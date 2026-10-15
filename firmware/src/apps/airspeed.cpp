@@ -1,6 +1,7 @@
 // Competition firmware: estimates airspeed on the Nucleo and streams it at 200 Hz over the
 // ST-LINK virtual COM port (115200 baud). Protocol summary (full spec in README):
 //
+//   chain            model -> median-3 -> lead -> Butterworth LPF -> clamp >= 0
 //   default stream   one velocity per line, m/s, e.g. "5.123"
 //   '#' lines        informational, never data
 //   MODE V | MODE D  velocity only | debug CSV (prints a "#cols,..." header)
@@ -93,6 +94,14 @@ airmath::LeadCompensator g_lead;
 airmath::Median3 g_median;
 airmath::ButterworthLowPass g_lpf;
 
+// TARE changes the load cell's offset behind g_params' back; pull it in before reporting
+// or re-applying parameters so a later SET can't silently undo a tare.
+void sync_from_hardware() {
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  if (!g_load_cell.taring()) g_params.lc_offset = static_cast<float>(g_load_cell.offset());
+#endif
+}
+
 void apply_filter_params() {
   g_lead.configure(g_params.lead_tau, board::kSampleHz);
   g_lpf.configure(g_params.lpf_hz, board::kSampleHz);
@@ -175,8 +184,10 @@ void tick() {
   float rho = g_env.density();
   float feature = read_feature();
   float v = model(feature, rho);
-  v = g_lead.update(v);
+  // Median before lead: the lead turns each quantisation step of a rotor's rate into a
+  // spike train the median can no longer remove, and the LPF then turns that into bias.
   v = g_median.update(v);
+  v = g_lead.update(v);
   v = g_lpf.update(v);
   if (v < 0.0f) v = 0.0f;
   emit(v, feature, rho);
@@ -186,6 +197,7 @@ void tick() {
 // ---- Commands ----------------------------------------------------------------------------
 
 void print_cal() {
+  sync_from_hardware();
   Serial.print("#cal {\"method\":\"");
   Serial.print(method_name());
   Serial.print("\",\"build\":\"" __DATE__ " " __TIME__ "\",\"sample_hz\":");
@@ -231,6 +243,7 @@ void handle_set(char* args) {
   }
   for (const ParamEntry& p : kParams) {
     if (strcasecmp(name, p.name) == 0) {
+      sync_from_hardware();
       *p.value = v;
       apply_filter_params();
       Serial.print("#ok ");

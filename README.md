@@ -71,8 +71,8 @@ On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar
 ### Signal chain (`airspeed`)
 
 ```
-transducer feature ──► static model ──► lead ──► median-3 ──► Butterworth LPF ──► "5.123\n"
- (rev/s, N, V)          (uses ρ)        (lead_tau)  (spikes)     (lpf_hz)
+transducer feature ──► static model ──► median-3 ──► lead ──► Butterworth LPF ──► "5.123\n"
+ (rev/s, N, V)          (uses ρ)        (spikes)   (lead_tau)   (lpf_hz)
                            ▲
  MCP9808 ─┐                │
  SHT40 ───┤ inverse-variance T,  LPS22DF p,  SHT40 RH  ──►  ρ (humid-air ideal gas)
