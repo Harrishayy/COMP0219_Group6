@@ -25,15 +25,14 @@ constexpr uint8_t kEncoderFilter = 6;
 // TMP36 output -> PC2 (morpho CN7 pin 35, ADC1_IN12).
 constexpr uint32_t kPinTmp36 = PC2;
 
-// Allegro Hall sensor: digital output -> D7 (PA8), linear output -> PC3 (CN7 pin 37, ADC1_IN13).
+// Allegro Hall switch output -> D7 (PA8).
 constexpr uint32_t kPinHallDigital = PA8;
-constexpr uint32_t kPinHallAnalog = PC3;
 constexpr uint8_t kHallPulsesPerRev = 1;  // magnets on the rotor
 
 constexpr uint32_t kPinLed = LED_BUILTIN;  // LD2, PA5
 
 // 7-bit I2C addresses. The ST libraries take their own (8-bit) defaults internally:
-// LPS22DF 0x5D, STTS22H 0x38, LSM6DSO16IS 0x6A, LSM6DSV16X 0x6B, LIS2MDL 0x1E, LIS2DUXS12 0x19.
+// LPS22DF 0x5D, STTS22H 0x38. Other IKS4A1 parts (unused) sit at 0x19, 0x1E, 0x6A, 0x6B.
 constexpr uint8_t kAddrMcp9808 = 0x18;  // A2..A0 = 000; 0x19 would clash with the LIS2DUXS12
 constexpr uint8_t kAddrSht40 = 0x44;
 constexpr uint8_t kAddrNau7802 = 0x2A;  // fixed

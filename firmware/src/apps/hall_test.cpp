@@ -1,10 +1,7 @@
-// Hall sensor bench test. Streams "t_ms,edges,rev_per_s,analog_v" at 20 Hz:
-//   digital switch on D7 (PA8): edges and rotation rate
-//   linear sensor on PC3:       output voltage (for a cantilever/deflection design)
-// Wire whichever part you have; the other column just reads idle.
+// Hall switch bench test (D7/PA8). Streams "t_ms,edges,rev_per_s" at 20 Hz.
+// Spin the cups by hand: edges should rise by board::kHallPulsesPerRev per revolution.
 #include <Arduino.h>
 
-#include "analog_in.h"
 #include "board_config.h"
 #include "hall_sensor.h"
 
@@ -14,9 +11,8 @@ HallTachometer g_tacho;
 
 void setup() {
   Serial.begin(board::kSerialBaud);
-  analog_in::begin();
   g_tacho.begin(board::kPinHallDigital, board::kHallPulsesPerRev);
-  Serial.println("#cols,t_ms,edges,rev_per_s,analog_v");
+  Serial.println("#cols,t_ms,edges,rev_per_s");
 }
 
 void loop() {
@@ -27,7 +23,5 @@ void loop() {
   Serial.print(',');
   Serial.print(g_tacho.edges());
   Serial.print(',');
-  Serial.print(g_tacho.rev_per_sec(), 4);
-  Serial.print(',');
-  Serial.println(analog_in::read_volts(board::kPinHallAnalog, 16), 4);
+  Serial.println(g_tacho.rev_per_sec(), 4);
 }

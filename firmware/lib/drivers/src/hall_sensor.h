@@ -1,6 +1,4 @@
-// Allegro Hall-effect sensor, in either of two roles:
-//   HallTachometer: digital switch/latch + rotor magnets -> rotation rate
-//   (linear/ratiometric parts are read with analog_in::read_volts() instead).
+// Allegro Hall-effect switch/latch + rotor magnets -> rotation rate of the cup anemometer.
 #pragma once
 
 #include <Arduino.h>

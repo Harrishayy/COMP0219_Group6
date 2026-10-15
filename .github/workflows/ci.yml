@@ -25,8 +25,8 @@ jobs:
       - name: Build every firmware env
         run: |
           pio run -d firmware \
-            -e airspeed -e airspeed_cup_hall -e airspeed_drag_plate -e airspeed_cantilever \
-            -e env_monitor -e i2c_scan -e loadcell_test -e encoder_test -e hall_test -e imu_test
+            -e airspeed -e airspeed_cup_hall -e airspeed_drag_plate \
+            -e env_monitor -e i2c_scan -e loadcell_test -e encoder_test -e hall_test
 
   host:
     runs-on: ubuntu-latest

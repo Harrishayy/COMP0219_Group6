@@ -60,19 +60,18 @@ On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar
 | Env                                         | What it does                                                                 |
 | ------------------------------------------- | ---------------------------------------------------------------------------- |
 | `airspeed` (default)                        | Competition firmware: 200 Hz estimate, density-compensated, serial protocol |
-| `airspeed_cup_hall` / `_drag_plate` / `_cantilever` | Same firmware for the other transducer variants (kept building in CI)  |
+| `airspeed_cup_hall` / `airspeed_drag_plate` | Same firmware for the other transducer variants (kept building in CI)  |
 | `env_monitor`                               | All five thermometers, pressure, humidity, fused T and air density, 4 Hz CSV |
 | `i2c_scan`                                  | Lists I2C devices with the kit part each address belongs to                 |
 | `loadcell_test`                             | NAU7802 raw/force; `t` tares, `k 200` calibrates with a 200 g mass           |
 | `encoder_test`                              | EM14 count and rev/s from the TIM2 hardware decoder                         |
-| `hall_test`                                 | Hall switch rotation rate and linear-Hall voltage                           |
-| `imu_test`                                  | LSM6DSO16IS accel/gyro + LIS2MDL magnetometer at 100 Hz                     |
+| `hall_test`                                 | Hall switch edge count and rotation rate                                    |
 
 ### Signal chain (`airspeed`)
 
 ```
 transducer feature ──► static model ──► median-3 ──► lead ──► Butterworth | EMA ──► "5.123\n"
- (rev/s, N, V)          (uses ρ)        (spikes)   (lead_tau)  (filter_kind: lpf_hz | ema_alpha)
+ (rev/s, N)             (uses ρ)        (spikes)   (lead_tau)  (filter_kind: lpf_hz | ema_alpha)
                            ▲
  MCP9808 ─┐                │
  SHT40 ───┤ inverse-variance T,  LPS22DF p,  SHT40 RH  ──►  ρ (humid-air ideal gas)
@@ -88,7 +87,6 @@ Transducer options (`AIRSPEED_METHOD`):
 | `METHOD_CUP_ENCODER`      | rotor rev/s from the EM14 (TIM2, x4) | `v = rotor_slope·f + rotor_offset`  |
 | `METHOD_CUP_HALL`         | rotor rev/s from magnets + Hall switch | same                              |
 | `METHOD_DRAG_PLATE`       | drag force from the load cell [N] | `v = √(sqrt_k·(F − sqrt_x0)/ρ)`, with `sqrt_k = 2/(C_d·A)` |
-| `METHOD_CANTILEVER_HALL`  | linear-Hall voltage from a deflecting cantilever | `v = √(sqrt_k·(x − sqrt_x0)/ρ)` |
 
 ### Air density
 
@@ -150,7 +148,7 @@ The output smoother is chosen with `filter_kind`: `0` = 2nd-order Butterworth at
 
 Wiring and pin choices are in [`docs/hardware.md`](docs/hardware.md). In short: the IKS4A1 sits on the Arduino
 headers, and the Qwiic parts (NAU7802, MCP9808) share I2C1 on D14/D15. The encoder goes on A0/A1 (TIM2), the
-TMP36 on PC2, and the Hall sensor on D7 (digital) or PC3 (linear).
+TMP36 on PC2, and the Hall switch on D7.
 
 ## Tests and CI
 

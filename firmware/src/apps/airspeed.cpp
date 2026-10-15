@@ -27,8 +27,6 @@
 #include "hall_sensor.h"
 #elif AIRSPEED_METHOD == METHOD_DRAG_PLATE
 #include "load_cell.h"
-#elif AIRSPEED_METHOD == METHOD_CANTILEVER_HALL
-// linear Hall read through analog_in
 #else
 #error "Unknown AIRSPEED_METHOD, see include/calibration.h"
 #endif
@@ -71,7 +69,6 @@ const char* method_name() {
     case METHOD_CUP_ENCODER: return "cup_encoder";
     case METHOD_CUP_HALL: return "cup_hall";
     case METHOD_DRAG_PLATE: return "drag_plate";
-    case METHOD_CANTILEVER_HALL: return "cantilever_hall";
     default: return "unknown";
   }
 }
@@ -148,8 +145,6 @@ float read_feature() {
 #elif AIRSPEED_METHOD == METHOD_DRAG_PLATE
   g_load_cell.poll();  // 320 SPS: a fresh conversion on most ticks, else hold the last one
   return g_load_cell.force_n();
-#elif AIRSPEED_METHOD == METHOD_CANTILEVER_HALL
-  return analog_in::read_volts(board::kPinHallAnalog, 4);
 #endif
 }
 

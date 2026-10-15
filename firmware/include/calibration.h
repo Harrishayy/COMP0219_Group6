@@ -13,7 +13,6 @@
 #define METHOD_CUP_ENCODER 1      // cups/vanes on the EM14 encoder, feature = rev/s
 #define METHOD_CUP_HALL 2         // cups/vanes with magnets + Hall switch, feature = rev/s
 #define METHOD_DRAG_PLATE 3       // plate on the load cell, feature = force [N]
-#define METHOD_CANTILEVER_HALL 4  // flexible cantilever + magnet over a linear Hall, feature = volts
 
 #ifndef AIRSPEED_METHOD
 #define AIRSPEED_METHOD METHOD_CUP_ENCODER
@@ -33,7 +32,8 @@
 #define CAL_ROTOR_WINDOW_MS 50.0f  // encoder rate window: longer = smoother but laggier
 #endif
 
-// ---- Square-root model for force/deflection: v = sqrt(sqrt_k * (x - sqrt_x0) / rho) -----
+// ---- Square-root model for the drag plate: v = sqrt(sqrt_k * (F - sqrt_x0) / rho) --------
+// sqrt_k = 2 / (Cd * A)
 #ifndef CAL_SQRT_K
 #define CAL_SQRT_K 1.0f
 #endif

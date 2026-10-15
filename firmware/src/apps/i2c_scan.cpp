@@ -9,14 +9,14 @@ namespace {
 const char* guess(uint8_t addr) {
   switch (addr) {
     case 0x18: return "MCP9808 (default) / LIS2DUXS12 (SA0=0)";
-    case 0x19: return "LIS2DUXS12 (IKS4A1)";
-    case 0x1E: return "LIS2MDL magnetometer (IKS4A1)";
+    case 0x19: return "LIS2DUXS12 (IKS4A1, unused)";
+    case 0x1E: return "LIS2MDL magnetometer (IKS4A1, unused)";
     case 0x2A: return "NAU7802 Qwiic Scale";
     case 0x38: return "STTS22H temperature (IKS4A1)";
     case 0x44: return "SHT40 humidity/temperature (IKS4A1)";
     case 0x5D: return "LPS22DF pressure (IKS4A1)";
-    case 0x6A: return "LSM6DSO16IS IMU (IKS4A1)";
-    case 0x6B: return "LSM6DSV16X IMU (IKS4A1)";
+    case 0x6A: return "LSM6DSO16IS IMU (IKS4A1, unused)";
+    case 0x6B: return "LSM6DSV16X IMU (IKS4A1, unused)";
     default:
       if (addr >= 0x18 && addr <= 0x1F) return "MCP9808 (A2..A0 strapped)?";
       return "?";
