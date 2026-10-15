@@ -53,6 +53,12 @@
 #ifndef CAL_LEAD_TAU
 #define CAL_LEAD_TAU 0.0f  // s; first-order lead to cancel rotor lag, 0 = off
 #endif
+#ifndef CAL_FILTER_KIND
+#define CAL_FILTER_KIND 0.0f  // output smoother: 0 = Butterworth on lpf_hz, 1 = EMA on ema_alpha
+#endif
 #ifndef CAL_LPF_HZ
 #define CAL_LPF_HZ 10.0f  // 2nd-order Butterworth cutoff on the output; >= 100 disables it
+#endif
+#ifndef CAL_EMA_ALPHA
+#define CAL_EMA_ALPHA 1.0f  // EMA: y = alpha*x + (1-alpha)*y_prev, 0 < alpha <= 1; 1 = pass-through
 #endif

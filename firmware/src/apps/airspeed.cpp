@@ -1,7 +1,7 @@
 // Competition firmware: estimates airspeed on the Nucleo and streams it at 200 Hz over the
 // ST-LINK virtual COM port (115200 baud). Protocol summary (full spec in README):
 //
-//   chain            model -> median-3 -> lead -> Butterworth LPF -> clamp >= 0
+//   chain            model -> median-3 -> lead -> [Butterworth | EMA] -> clamp >= 0
 //   default stream   one velocity per line, m/s, e.g. "5.123"
 //   '#' lines        informational, never data
 //   MODE V | MODE D  velocity only | debug CSV (prints a "#cols,..." header)
@@ -48,6 +48,8 @@ struct Params {
   float lc_n_per_count = CAL_LC_N_PER_COUNT;
   float lead_tau = CAL_LEAD_TAU;
   float lpf_hz = CAL_LPF_HZ;
+  float filter_kind = CAL_FILTER_KIND;
+  float ema_alpha = CAL_EMA_ALPHA;
 } g_params;
 
 struct ParamEntry {
@@ -61,6 +63,7 @@ const ParamEntry kParams[] = {
     {"sqrt_k", &g_params.sqrt_k},             {"sqrt_x0", &g_params.sqrt_x0},
     {"lc_offset", &g_params.lc_offset},       {"lc_n_per_count", &g_params.lc_n_per_count},
     {"lead_tau", &g_params.lead_tau},         {"lpf_hz", &g_params.lpf_hz},
+    {"filter_kind", &g_params.filter_kind},   {"ema_alpha", &g_params.ema_alpha},
 };
 
 const char* method_name() {
@@ -93,6 +96,8 @@ LoadCell g_load_cell;
 airmath::LeadCompensator g_lead;
 airmath::Median3 g_median;
 airmath::ButterworthLowPass g_lpf;
+airmath::Ema g_ema;
+bool g_use_ema = false;
 
 // TARE changes the load cell's offset behind g_params' back; pull it in before reporting
 // or re-applying parameters so a later SET can't silently undo a tare.
@@ -105,6 +110,17 @@ void sync_from_hardware() {
 void apply_filter_params() {
   g_lead.configure(g_params.lead_tau, board::kSampleHz);
   g_lpf.configure(g_params.lpf_hz, board::kSampleHz);
+  // Clamp rather than reject so the reported value is always the one in use.
+  g_params.filter_kind = g_params.filter_kind >= 0.5f ? 1.0f : 0.0f;
+  if (!(g_params.ema_alpha > 0.0f)) g_params.ema_alpha = 1e-4f;
+  if (g_params.ema_alpha > 1.0f) g_params.ema_alpha = 1.0f;
+  g_ema.set_alpha(g_params.ema_alpha);
+  bool use_ema = g_params.filter_kind == 1.0f;
+  if (use_ema != g_use_ema) {
+    g_ema.reset();  // re-prime on switch so neither filter starts from a stale state
+    g_lpf.reset();
+  }
+  g_use_ema = use_ema;
 #if AIRSPEED_METHOD == METHOD_DRAG_PLATE
   g_load_cell.set_offset(static_cast<int32_t>(g_params.lc_offset));
   g_load_cell.set_scale(g_params.lc_n_per_count);
@@ -188,7 +204,7 @@ void tick() {
   // spike train the median can no longer remove, and the LPF then turns that into bias.
   v = g_median.update(v);
   v = g_lead.update(v);
-  v = g_lpf.update(v);
+  v = g_use_ema ? g_ema.update(v) : g_lpf.update(v);
   if (v < 0.0f) v = 0.0f;
   emit(v, feature, rho);
   ++g_seq;
@@ -249,7 +265,7 @@ void handle_set(char* args) {
       Serial.print("#ok ");
       Serial.print(p.name);
       Serial.print('=');
-      Serial.println(v, 7);
+      Serial.println(*p.value, 7);  // after clamping
       return;
     }
   }

@@ -71,8 +71,8 @@ On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar
 ### Signal chain (`airspeed`)
 
 ```
-transducer feature ──► static model ──► median-3 ──► lead ──► Butterworth LPF ──► "5.123\n"
- (rev/s, N, V)          (uses ρ)        (spikes)   (lead_tau)   (lpf_hz)
+transducer feature ──► static model ──► median-3 ──► lead ──► Butterworth | EMA ──► "5.123\n"
+ (rev/s, N, V)          (uses ρ)        (spikes)   (lead_tau)  (filter_kind: lpf_hz | ema_alpha)
                            ▲
  MCP9808 ─┐                │
  SHT40 ───┤ inverse-variance T,  LPS22DF p,  SHT40 RH  ──►  ρ (humid-air ideal gas)
@@ -130,7 +130,10 @@ changed over serial with `SET <name> <value>` without reflashing. See [`docs/cal
 | `STATS`            | `#stats n=... overruns=... max_busy_us=...`                                 |
 | `HELP`             | Command and parameter list                                                  |
 
-Parameters: `rotor_slope rotor_offset rotor_min_hz rotor_window_ms sqrt_k sqrt_x0 lc_offset lc_n_per_count lead_tau lpf_hz`.
+Parameters: `rotor_slope rotor_offset rotor_min_hz rotor_window_ms sqrt_k sqrt_x0 lc_offset lc_n_per_count lead_tau lpf_hz filter_kind ema_alpha`.
+
+The output smoother is chosen with `filter_kind`: `0` = 2nd-order Butterworth at `lpf_hz`, `1` = EMA
+`y = α·x + (1−α)·y_prev` with `α = ema_alpha`. The EMA's −3 dB cutoff is about `α·200/(2π(1−α))` Hz.
 
 ## Host tools
 
