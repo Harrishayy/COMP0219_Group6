@@ -19,3 +19,6 @@ data/logs/
 # OS / editors
 .DS_Store
 .idea/
+
+# Editor design-hook caches
+.impeccable/

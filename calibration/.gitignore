@@ -1,0 +1,7 @@
+# Recordings and exports are generated locally; keep the calibration you ship by committing it elsewhere.
+runs/
+exports/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/

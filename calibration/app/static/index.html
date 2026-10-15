@@ -1,0 +1,1721 @@
+<title>Airspeed Calibration Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen instrument bench. Status rail on top; tabbed control column left; scope + analysis grid right. Everything fits the viewport on a laptop; below 1000 px it stacks and scrolls. */
+:root {
+  --bg: #eef1f4;
+  --panel: #fbfcfd;
+  --sunk: #e4e9ee;
+  --ink: #15212c;
+  --muted: #5a6977;
+  --faint: #8a98a5;
+  --line: #d3dbe2;
+  --accent: #1f5fbf;
+  --accent-ink: #ffffff;
+  --gt: #15212c;
+  --est: #e0601f;
+  --dev: #7b4fc4;
+  --grid: rgba(21, 33, 44, 0.07);
+  --good: #1d8655;
+  --warn: #b7791f;
+  --bad: #c43c3c;
+  --good-bg: rgba(29, 134, 85, 0.12);
+  --warn-bg: rgba(183, 121, 31, 0.14);
+  --bad-bg: rgba(196, 60, 60, 0.12);
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e141a; --panel: #141c24; --sunk: #0b1116; --ink: #e3eaf1; --muted: #93a2b0; --faint: #66768a;
+    --line: #253240; --accent: #6f9cff; --accent-ink: #0b1116; --gt: #e3eaf1; --est: #ff8c4f; --dev: #b996f7;
+    --grid: rgba(227, 234, 241, 0.07); --good: #43c08a; --warn: #e0a84a; --bad: #f07272;
+    --good-bg: rgba(67, 192, 138, 0.14); --warn-bg: rgba(224, 168, 74, 0.15); --bad-bg: rgba(240, 114, 114, 0.14);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e141a; --panel: #141c24; --sunk: #0b1116; --ink: #e3eaf1; --muted: #93a2b0; --faint: #66768a;
+  --line: #253240; --accent: #6f9cff; --accent-ink: #0b1116; --gt: #e3eaf1; --est: #ff8c4f; --dev: #b996f7;
+  --grid: rgba(227, 234, 241, 0.07); --good: #43c08a; --warn: #e0a84a; --bad: #f07272;
+  --good-bg: rgba(67, 192, 138, 0.14); --warn-bg: rgba(224, 168, 74, 0.15); --bad-bg: rgba(240, 114, 114, 0.14);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-display); font-size: 13px; line-height: 1.35; }
+.mono, input[type=number] { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+button, select, input { font: inherit; color: inherit; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+
+/* Status rail */
+.rail { background: var(--panel); border-bottom: 1px solid var(--line); padding-block: 7px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { margin: 0; font-size: 16px; font-weight: 750; font-stretch: 80%; letter-spacing: 0.01em; text-transform: uppercase; white-space: nowrap; }
+.brand small { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid var(--line); background: var(--sunk); color: var(--muted); white-space: nowrap; }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.live { color: var(--good); background: var(--good-bg); border-color: transparent; }
+.pill.sim { color: var(--accent); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+.pill.bad { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+.tele { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-left: auto; }
+.tele div { display: flex; flex-direction: column; }
+.tele label { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); font-weight: 600; white-space: nowrap; }
+.tele span { font-family: var(--f-mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail-actions { display: flex; gap: 6px; }
+
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); padding: 5px 10px; cursor: pointer; font-size: 12.5px; font-weight: 550; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.on { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+.btn.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+.btn.rec.on .dot { animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.sm { padding: 3px 8px; font-size: 11.5px; }
+
+/* Body */
+.body { min-height: 0; display: grid; grid-template-columns: 318px minmax(0, 1fr); gap: 10px; padding-block: 10px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+.side { min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.tabs { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 1px solid var(--line); background: var(--sunk); }
+.tabs button { border: 0; background: transparent; padding: 8px 2px; cursor: pointer; font-size: 12px; font-weight: 650; color: var(--muted); position: relative; }
+.tabs button[aria-selected=true] { background: var(--panel); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.tabs button .badge { position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
+.panel { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.sh { margin: 0; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.hint { color: var(--muted); font-size: 11.5px; margin: 0; }
+.hint.ok { color: var(--good); } .hint.w { color: var(--warn); } .hint.e { color: var(--bad); }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+select { border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); padding: 4px 7px; font-size: 12px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--sunk); }
+.seg button { border: 0; background: transparent; padding: 5px 8px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.seg button[aria-pressed=true] { background: var(--panel); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.seg.mini button { padding: 2px 7px; font-size: 11px; }
+.formula { font-family: var(--f-mono); font-size: 11.5px; background: var(--sunk); border-radius: 4px; padding: 5px 8px; color: var(--ink); }
+
+/* Params */
+.pgroup { display: flex; flex-direction: column; }
+.pgroup > .gh { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); font-weight: 700; padding-bottom: 2px; display: flex; gap: 6px; align-items: center; }
+.param { padding: 7px 0 6px; border-top: 1px dashed var(--line); display: grid; grid-template-columns: minmax(0, 1fr) 88px 18px; gap: 2px 6px; align-items: center; }
+.param .pl { min-width: 0; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.param .pl label { font-weight: 650; font-size: 12.5px; }
+.param .pl code { font-family: var(--f-mono); font-size: 10px; color: var(--faint); }
+.param.dirty .pl label { color: var(--accent); }
+.param.dirty .pl label::after { content: " •"; }
+.param input[type=number] { width: 100%; border: 1px solid var(--line); background: var(--sunk); border-radius: 4px; padding: 2px 5px; font-size: 11.5px; text-align: right; }
+.param .rs { border: 0; background: none; cursor: pointer; color: var(--faint); font-size: 13px; padding: 0; }
+.param .rs:hover { color: var(--ink); }
+.param .what { grid-column: 1 / 4; font-size: 11px; color: var(--muted); }
+.param input[type=range] { grid-column: 1 / 4; width: 100%; accent-color: var(--accent); margin: 2px 0 0; height: 16px; }
+.param .ends { grid-column: 1 / 4; display: flex; justify-content: space-between; font-size: 10px; color: var(--faint); gap: 8px; }
+.param .unit { font-family: var(--f-mono); font-size: 10px; color: var(--faint); }
+.tag { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; padding: 1px 5px; border-radius: 3px; text-transform: uppercase; background: var(--sunk); color: var(--muted); border: 1px solid var(--line); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px 2px 6px; font-size: 11.5px; cursor: pointer; user-select: none; background: var(--panel); }
+.chip input { margin: 0; accent-color: var(--accent); }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 3px 5px; text-align: right; border-bottom: 1px solid var(--line); font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 11px; white-space: nowrap; }
+th { font-family: var(--f-display); font-weight: 650; color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+td:first-child, th:first-child { text-align: left; }
+td.wrap { white-space: normal; text-align: left; font-family: var(--f-display); }
+tr.cur td { background: var(--sunk); }
+.tbl { overflow-x: auto; }
+.delta-good { color: var(--good); } .delta-bad { color: var(--bad); }
+.log { font-family: var(--f-mono); font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+.log div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log .w { color: var(--warn); } .log .e { color: var(--bad); } .log .ok { color: var(--good); }
+.recstat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.recstat div { background: var(--sunk); border-radius: 4px; padding: 5px 7px; display: flex; flex-direction: column; }
+.recstat label { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); font-weight: 650; }
+.recstat span { font-family: var(--f-mono); font-size: 14px; }
+.note-in { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--sunk); border-radius: 4px; padding: 4px 7px; font-size: 12px; }
+.truth { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+
+/* Guided steps */
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: st; }
+.step { border: 1px solid var(--line); border-radius: var(--r); padding: 7px 9px; display: flex; flex-direction: column; gap: 5px; counter-increment: st; }
+.step.open { border-color: var(--accent); }
+.step > .stH { display: flex; align-items: center; gap: 8px; cursor: pointer; background: none; border: 0; padding: 0; text-align: left; width: 100%; }
+.step > .stH::before { content: counter(st); width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; font-family: var(--f-mono); font-size: 11px; background: var(--sunk); color: var(--muted); flex: none; }
+.step.done > .stH::before { content: "✓"; background: var(--good-bg); color: var(--good); }
+.step.warn > .stH::before { background: var(--warn-bg); color: var(--warn); }
+.step .stT { font-weight: 650; font-size: 12.5px; flex: 1; }
+.step .stS { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.step .stB { display: flex; flex-direction: column; gap: 6px; }
+.cov { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; }
+.cov span { height: 14px; border-radius: 2px; background: var(--sunk); font-family: var(--f-mono); font-size: 8.5px; color: var(--faint); display: grid; place-items: center; }
+.cov span.on { background: var(--good-bg); color: var(--good); }
+.cov span.part { background: var(--warn-bg); color: var(--warn); }
+.wtbl input { width: 70px; }
+
+/* Main */
+.main { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.card-head h3 { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.card-head .sp { flex: 1; }
+.card .sub { font-size: 11px; color: var(--muted); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plot { position: relative; flex: 1 1 0; min-height: 60px; }
+.plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.plot.err { flex: 0 0 26%; min-height: 50px; }
+.legend { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+.legend span.off { opacity: 0.4; text-decoration: line-through; }
+.swatch { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+
+.summary { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 10px; }
+.readout { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; align-content: start; }
+.readout label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 650; display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+.readout .v { font-family: var(--f-mono); font-size: 26px; font-weight: 500; line-height: 1.05; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.readout .v small { font-size: 11px; color: var(--muted); margin-left: 3px; letter-spacing: 0; }
+.gauge { grid-column: 1 / 3; height: 16px; position: relative; background: var(--sunk); border-radius: 3px; overflow: hidden; }
+.gauge .band { position: absolute; top: 0; bottom: 0; left: calc(2 / 12 * 100%); width: calc(8 / 12 * 100%); background: var(--grid); }
+.gauge .mk { position: absolute; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; transition: left 0.08s linear; }
+.gauge .ticks { position: absolute; inset: 0; display: flex; justify-content: space-between; padding: 0 2px; font-family: var(--f-mono); font-size: 8.5px; color: var(--faint); align-items: center; pointer-events: none; }
+.readout .delta { grid-column: 1 / 3; display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 12px; }
+.kpis { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kpis .row { justify-content: space-between; }
+.tiles { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; min-width: 0; cursor: help; }
+.tile.key { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tile label { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 650; display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; overflow: hidden; }
+.tile .val { font-family: var(--f-mono); font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile .val small { font-size: 10px; color: var(--muted); margin-left: 2px; }
+.tile .tsub { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state { width: 7px; height: 7px; border-radius: 50%; flex: none; align-self: center; }
+.state.good { background: var(--good); } .state.warn { background: var(--warn); } .state.bad { background: var(--bad); }
+.analysis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; min-height: 0; }
+@media (max-width: 1500px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* Too small for one screen: stack and scroll */
+@media (max-width: 1000px), (max-height: 640px) {
+  .app { height: auto; overflow: visible; }
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .side { max-height: 70vh; }
+  .main { grid-template-rows: auto 420px auto; }
+  .analysis { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 250px; }
+}
+@media (max-width: 640px) {
+  .summary { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analysis { grid-template-columns: minmax(0, 1fr); }
+  .tele { margin-left: 0; }
+}
+
+/* Export dialog */
+.modal { position: fixed; inset: 0; background: rgba(8, 12, 16, 0.45); z-index: 50; display: flex; align-items: center; justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.modal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; width: min(820px, 100%); max-height: 100%; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.modal pre { margin: 0; background: var(--sunk); border-radius: 4px; padding: 10px; font-family: var(--f-mono); font-size: 12px; overflow: auto; max-height: 300px; }
+.modal .tabsx .btn[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .gauge .mk { transition: none; } .btn.rec.on .dot { animation: none; } }
+</style>
+
+<div class="app">
+<header class="rail">
+  <div class="brand"><h1>Airspeed Calibration Bench</h1><small>COMP0219 · 2–10 m/s · 200 Hz</small></div>
+  <span id="modePill" class="pill sim"><span class="dot"></span><span id="modeTxt">Simulator</span></span>
+  <div class="tele">
+    <div title="Rate the sensor stream is arriving at. Should be 200 Hz."><label>Sensor</label><span id="tSens">–</span></div>
+    <div title="Rate of the Dwyer pitot ground truth."><label>Ground truth</label><span id="tGt">–</span></div>
+    <div title="Missed 200 Hz ticks (gaps in the board's sample counter)."><label>Dropped</label><span id="tDrops">0</span></div>
+    <div title="The raw quantity the calibration curve converts to speed."><label id="tRawLbl">Raw</label><span id="tRaw">–</span></div>
+    <div title="ρ = P ÷ (287.05 × T), from the baro and temperature sensors."><label>Air density</label><span id="tRho">–</span></div>
+    <div><label>Temp</label><span id="tTemp">–</span></div>
+    <div><label>Pressure</label><span id="tBaro">–</span></div>
+  </div>
+  <div class="rail-actions">
+    <button class="btn" id="btnPause" title="Freeze the display">Pause</button>
+    <button class="btn rec" id="btnRecTop" title="Record every sample, parameter change and score to a file"><span class="dot"></span><span id="recTopTxt">Record</span></button>
+    <button class="btn" id="btnExport" title="Firmware header, calibration JSON and SET commands">Export calibration</button>
+  </div>
+</header>
+
+<div class="body">
+  <aside class="side">
+    <nav class="tabs" role="tablist" aria-label="Controls">
+      <button role="tab" aria-selected="true" data-tab="steps">Steps</button>
+      <button role="tab" aria-selected="false" data-tab="tune">Tune</button>
+      <button role="tab" aria-selected="false" data-tab="fit">Fit</button>
+      <button role="tab" aria-selected="false" data-tab="rec">Record<span class="badge" id="recBadge" hidden></span></button>
+      <button role="tab" aria-selected="false" data-tab="board">Setup</button>
+      <button role="tab" aria-selected="false" data-tab="log">Log</button>
+    </nav>
+
+    <div class="panel" id="tab-steps" role="tabpanel">
+      <div class="field">
+        <span class="sh">Method</span>
+        <div class="seg" id="modelSeg2" role="group" aria-label="Method"></div>
+      </div>
+      <p class="hint">Work down the list. Each step checks itself against the live data; you can redo any step.</p>
+      <ol class="steps" id="steps"></ol>
+    </div>
+
+    <div class="panel" id="tab-tune" role="tabpanel" hidden>
+      <div class="field">
+        <span class="sh">Method</span>
+        <div class="seg" id="modelSeg" role="group" aria-label="Method"></div>
+      </div>
+      <p class="hint" id="modelHint"></p>
+      <div class="formula" id="formula"></div>
+      <div class="row" id="plateRow" hidden>
+        <label class="hint" for="plateArea">Plate area A</label>
+        <input type="number" id="plateArea" class="note-in" style="flex:0 0 80px;text-align:right" value="100" step="any" aria-label="Plate area in cm²"><span class="hint">cm²</span>
+        <span class="hint" id="plateCd"></span>
+      </div>
+      <div id="params" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div class="row">
+        <button class="btn sm" id="btnResetAll" title="Throw away unpushed edits">Back to board values</button>
+        <button class="btn sm" id="btnBaseline" title="Remember the current score and settings so the tiles show the change">Pin as baseline</button>
+        <button class="btn sm" id="btnRevert" disabled>Restore baseline</button>
+      </div>
+      <p class="hint">Edits change the orange preview line instantly. They reach the sensor only when you push them (Board tab). A <span style="color:var(--accent)">blue •</span> marks values that differ from the board.</p>
+    </div>
+
+    <div class="panel" id="tab-fit" role="tabpanel" hidden>
+      <p class="hint">Let an optimiser search for the settings that best match the ground truth over the last few seconds of data.</p>
+      <div class="row">
+        <div class="field" style="flex:1;min-width:140px">
+          <label class="hint" for="fitMethod">Method</label>
+          <select id="fitMethod">
+            <option value="robust_lsq">Robust (ignores spikes)</option>
+            <option value="lsq">Least squares (pure MSE)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="hint" for="fitWin">Using the last</label>
+          <select id="fitWin"><option value="15">15 s</option><option value="30">30 s</option><option value="60" selected>60 s</option><option value="120">120 s</option></select>
+        </div>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        <span class="hint">Settings it may change</span>
+        <span class="row" style="gap:4px"><button class="btn sm" data-preset="static" title="Calibration curve only">Curve</button><button class="btn sm" data-preset="dyn" title="Smoothing and lag compensation">Response</button><button class="btn sm" data-preset="all">All</button></span>
+      </div>
+      <div class="chips" id="freeChips"></div>
+      <div class="row">
+        <button class="btn primary" id="btnFit">Fit to ground truth</button>
+        <span class="hint" id="fitStatus"></span>
+      </div>
+      <div class="tbl" id="fitRes"></div>
+      <canvas id="cvConv" style="width:100%;height:46px" hidden></canvas>
+      <p class="hint">It fits on the first 70 % of the window and checks the result on the last 30 % (holdout). If holdout MSE does not drop, the fit is overfitting: don't push it.</p>
+    </div>
+
+    <div class="panel" id="tab-board" role="tabpanel" hidden>
+      <span class="sh">Data source</span>
+      <div id="srcNoServer" class="hint">This page is running its own simulator. To use the real sensor and pitot, run <span class="mono">python -m calib serve</span> in <span class="mono">calibration/</span> and open the page it prints (http://localhost:8765). Every calibration script is then driven from here.</div>
+      <div id="srcServer" hidden style="display:flex;flex-direction:column;gap:6px">
+        <div class="row">
+          <div class="field" style="flex:1;min-width:150px"><label class="hint" for="selPort">Nucleo port</label><select id="selPort"><option value="">–</option></select></div>
+          <div class="field"><label class="hint" for="selBaud">Baud</label><select id="selBaud"><option>115200</option><option>230400</option><option>921600</option></select></div>
+          <button class="btn sm" id="btnPorts" style="align-self:flex-end">Refresh</button>
+        </div>
+        <div class="row">
+          <div class="field"><label class="hint" for="selGtKind">Ground truth from</label>
+            <select id="selGtKind"><option value="cmd">their script (command)</option><option value="module">Python function</option><option value="port">serial port</option><option value="none">none</option></select></div>
+          <div class="field" style="flex:1;min-width:120px"><label class="hint" for="gtValue" id="gtValueLbl">Command</label><input id="gtValue" class="note-in" placeholder="python3 gt.py"></div>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="btnConnect">Connect hardware</button>
+          <button class="btn" id="btnUseSim">Use simulator</button>
+          <span class="hint" id="srcStatus"></span>
+        </div>
+        <span class="sh" style="margin-top:4px">Past recordings</span>
+        <div class="row">
+          <select id="selRun" style="flex:1;min-width:0"><option value="">–</option></select>
+          <button class="btn sm" id="btnRuns">Refresh</button>
+        </div>
+        <div class="row">
+          <button class="btn sm" id="btnRunSummary">Show results</button>
+          <button class="btn sm" id="btnReplay">Replay through the dashboard</button>
+        </div>
+        <div class="tbl" id="runSummary"></div>
+      </div>
+      <span class="sh">Send to the sensor</span>
+      <div class="row">
+        <button class="btn primary" id="btnPush">Push settings to sensor</button>
+        <label class="chip"><input type="checkbox" id="autoPush"> Push every change</label>
+      </div>
+      <p class="hint">Sends <span class="mono">SET</span> for each setting, then <span class="mono">GET</span> to confirm. The load-cell zero is never pushed, so a push cannot undo a TARE.</p>
+      <span class="sh">Commands</span>
+      <div class="row">
+        <button class="btn sm" data-cmd="TARE" title="Zero the load cell. Fan must be off.">TARE</button>
+        <button class="btn sm" data-cmd="GET" title="Read back every setting">GET</button>
+        <button class="btn sm" data-cmd="ENV" title="Temperature, pressure, density">ENV</button>
+        <button class="btn sm" data-cmd="STATS" title="Loop overruns and timing">STATS</button>
+        <button class="btn sm" data-cmd="MODE D" title="Stream raw channels (needed for tuning)">MODE D</button>
+        <button class="btn sm" data-cmd="MODE V" title="Competition stream: one float per line">MODE V</button>
+      </div>
+      <section id="simSec" style="display:flex;flex-direction:column;gap:8px">
+        <span class="sh">Simulator</span>
+        <div class="row">
+          <div class="field" style="flex:1">
+            <label class="hint" for="simProfile">Fan profile</label>
+            <select id="simProfile">
+              <option value="mixed" selected>Mixed steps + ramps</option>
+              <option value="steps">Steps 2–10 m/s</option>
+              <option value="ramps">Ramps</option>
+              <option value="sweep">Slow sweep</option>
+              <option value="gusts">Gusts around 6 m/s</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="hint" for="simTurb">Turbulence</label>
+            <select id="simTurb"><option value="0.005">Low</option><option value="0.015" selected>Medium</option><option value="0.035">High</option></select>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn sm" id="btnTruth">Reveal true values</button>
+          <button class="btn sm" id="btnSimReset">Restart run</button>
+        </div>
+        <div class="truth" id="truthBox" hidden></div>
+        <p class="hint">Stands in for the tunnel until hardware is connected: a fan with spin-up lag, a noisy pitot, a cup rotor with inertia and a ringing drag plate. Run <span class="mono">python -m calib serve</span> for the real streams.</p>
+      </section>
+    </div>
+
+    <div class="panel" id="tab-rec" role="tabpanel" hidden>
+      <p class="hint">Records every 200 Hz sample with ground truth, the PC preview, the board output and the settings in force. Each change of settings starts a new segment, scored against ground truth so you can see what each change did.</p>
+      <div class="row">
+        <button class="btn primary rec" id="btnRec"><span class="dot"></span><span id="recTxt">Start recording</span></button>
+        <span class="hint" id="recPath"></span>
+      </div>
+      <div class="recstat">
+        <div><label>Elapsed</label><span id="rsTime">0:00</span></div>
+        <div><label>Samples</label><span id="rsRows">0</span></div>
+        <div><label>Segments</label><span id="rsSegs">0</span></div>
+      </div>
+      <div class="row">
+        <input class="note-in" id="noteIn" placeholder="Note, e.g. moved plate 5 mm upstream" aria-label="Note">
+        <button class="btn sm" id="btnNote">Add note</button>
+      </div>
+      <span class="sh">Segments vs ground truth</span>
+      <div class="tbl"><table id="segTbl"><thead><tr><th>#</th><th>Length</th><th>What changed</th><th>MSE</th><th>vs prev</th></tr></thead><tbody></tbody></table></div>
+      <p class="hint" id="segHint">Start a recording, then change a setting to see its effect here. The first 0.5 s after a change is left out of the score while the filters settle.</p>
+      <div class="row">
+        <button class="btn" id="btnSaveCsv" disabled>Save CSV</button>
+        <button class="btn" id="btnSaveJson" disabled>Save JSON</button>
+        <span class="hint" id="saveMsg"></span>
+      </div>
+      <p class="hint">CSV: one row per sample, with every setting as a column and a <span class="mono">segment</span> number. JSON: the same samples plus the settings timeline, every event and the per-segment scores.</p>
+    </div>
+
+    <div class="panel" id="tab-log" role="tabpanel" hidden>
+      <div class="log" id="log"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="summary">
+      <div class="readout">
+        <div><label><span class="swatch" style="background:var(--gt)"></span>Ground truth</label><div class="v" id="roGt">–<small>m/s</small></div></div>
+        <div><label><span class="swatch" style="background:var(--est)"></span><span id="roEstLbl">Calibrated</span></label><div class="v" id="roEst">–<small>m/s</small></div></div>
+        <div class="gauge" aria-hidden="true">
+          <div class="band"></div>
+          <div class="mk" id="gkGt" style="background:var(--gt)"></div>
+          <div class="mk" id="gkEst" style="background:var(--est)"></div>
+          <div class="mk" id="gkDev" style="background:var(--dev)"></div>
+          <div class="ticks"><span>0</span><span>2</span><span>4</span><span>6</span><span>8</span><span>10</span><span>12</span></div>
+        </div>
+        <div class="delta"><span>Error right now</span><span id="roErr">–</span></div>
+      </div>
+      <div class="kpis">
+        <div class="row">
+          <div class="row" style="gap:6px">
+            <span class="hint">Score</span>
+            <div class="seg mini" id="scoreSeg"><button aria-pressed="true" data-v="est" title="Your current settings, computed on the PC">PC preview</button><button aria-pressed="false" data-v="dev" title="What the sensor is actually outputting">Board output</button></div>
+          </div>
+          <div class="row" style="gap:6px">
+            <span class="hint">over the last</span>
+            <select id="metWin" aria-label="Scoring window"><option value="10">10 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="120">120 s</option></select>
+          </div>
+        </div>
+        <div class="tiles" id="tiles"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h3>Live airspeed</h3>
+        <div class="legend" id="legTs">
+          <span data-s="gt"><i class="swatch" style="background:var(--gt)"></i>Ground truth</span>
+          <span data-s="est"><i class="swatch" style="background:var(--est)"></i>PC preview</span>
+          <span data-s="dev"><i class="swatch" style="background:var(--dev)"></i>Board output</span>
+        </div>
+        <span class="sp"></span>
+        <span class="hint">Dashed lines: settings changed. Hover to read values.</span>
+        <select id="tsWin" aria-label="Time window"><option value="10">10 s</option><option value="20" selected>20 s</option><option value="60">60 s</option><option value="120">120 s</option></select>
+      </div>
+      <div class="plot"><canvas id="cvTs"></canvas></div>
+      <div class="plot err"><canvas id="cvErr"></canvas></div>
+    </section>
+
+    <section class="analysis">
+      <div class="card">
+        <div class="card-head"><h3>Calibration curve</h3></div>
+        <p class="sub" title="Each dot is one sample: the raw sensor reading against the true speed. The orange line is your current curve; the dotted purple line is what the board has.">Make the orange line run through the dots.</p>
+        <div class="plot"><canvas id="cvTc"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3 id="c2Title">Error by speed</h3><span class="sp"></span>
+          <div class="seg mini" id="c2Seg"><button aria-pressed="true" data-v="bins">By speed</button><button aria-pressed="false" data-v="hist">Spread</button></div></div>
+        <p class="sub" id="c2Sub"></p>
+        <div class="plot"><canvas id="cvC2"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Calibrated vs truth</h3></div>
+        <p class="sub" title="Each dot is one sample. On the dashed diagonal means a perfect reading; the shaded lines are ±0.5 m/s. Loops are lag on speed changes.">On the diagonal means a perfect reading.</p>
+        <div class="plot"><canvas id="cvSc"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3 id="c4Title">Score over time</h3><span class="sp"></span>
+          <select id="rawSel" aria-label="Telemetry channel" hidden><option value="feature">Raw reading</option><option value="rho">Air density</option><option value="temp_c">Temperature</option><option value="pressure_pa">Pressure</option><option value="rate">Sample interval</option></select>
+          <div class="seg mini" id="c4Seg"><button aria-pressed="true" data-v="hist">Score</button><button aria-pressed="false" data-v="tele">Telemetry</button></div></div>
+        <p class="sub" id="c4Sub"></p>
+        <div class="plot"><canvas id="cvC4"></canvas></div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="row" style="justify-content:space-between"><h2 id="modalTitle" style="margin:0;font-size:15px">Export calibration</h2><button class="btn sm" id="modalClose">Close</button></div>
+    <p class="hint">The firmware header goes in <span class="mono">firmware/include/calibration_generated.h</span>. In the live app the files are also written to <span class="mono">calibration/exports/</span>.</p>
+    <div class="row tabsx" id="expTabs">
+      <button class="btn sm" aria-pressed="true" data-t="json">calibration.json</button>
+      <button class="btn sm" aria-pressed="false" data-t="h">calibration_generated.h</button>
+      <button class="btn sm" aria-pressed="false" data-t="cmd">SET commands</button>
+    </div>
+    <pre id="expText"></pre>
+    <div class="row"><button class="btn primary" id="btnCopy">Copy</button><button class="btn" id="btnSaveExp">Save file</button><button class="btn" id="btnWrite" hidden>Write files on PC</button><label class="chip" id="installWrap" hidden><input type="checkbox" id="chkInstall"> also install into firmware/include</label><span class="hint" id="copyMsg"></span></div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const FS = 200, DT = 1 / FS;
+const MAX_S = 150, MAX_N = MAX_S * FS;
+const WARM_S = 0.5;
+
+/* ---------- Model definitions (mirror firmware/lib/airmath + calibration/docs/SPEC.md §3) ----------
+   label/what/lo/hi are the plain-language face of each firmware parameter. */
+const COMMON = [
+  // Output smoothing is the team's EMA: V = α·V_new + (1 − α)·V_previous. filter_kind = 1 selects it on the board;
+  // lpf_hz only exists so a board still on its Butterworth default previews correctly until the first push.
+  { name: 'filter_kind', label: 'Filter', value: 1, min: 0, max: 1, step: 1, unit: '', group: 'response', hidden: true, what: '' },
+  { name: 'ema_alpha', label: 'Smoothing α (EMA)', value: 0.2, min: 0.005, max: 1, step: 0.001, unit: '', group: 'response',
+    what: 'V = α·V_new + (1 − α)·V_previous. Too low: smooth but lags steps (hurts MSE). Too high: tracks instantly but noisy.', lo: 'smooth, laggy', hi: 'instant, noisy' },
+  { name: 'lpf_hz', label: 'Butterworth cutoff', value: 10, min: 0, max: 40, step: 0.1, unit: 'Hz', group: 'response', hidden: true, what: '' },
+  { name: 'lead_tau', label: 'Lag compensation', value: 0, min: 0, max: 0.6, step: 0.002, unit: 's', group: 'response',
+    what: 'Pushes the output ahead in time to cancel the cups\' spin-up delay or the plate\'s settling. 0 = off.', lo: 'none', hi: 'aggressive, overshoots' },
+  { name: 'rho_ref', label: 'Air density fallback', value: 1.204, min: 1.0, max: 1.35, step: 0.001, unit: 'kg/m³', group: 'env', hidden: true, what: '' },
+];
+const GROUPS = {
+  curve: { label: 'Calibration curve' },
+  response: { label: 'Response: lag vs noise' },
+  board: { label: 'Load cell · applied on the board', tag: 'push to apply' },
+};
+const MODELS = {
+  rotor: {
+    label: 'Cup anemometer', short: 'Cups', method: 'METHOD_CUP_ENCODER',
+    hint: 'Each cup feels drag ½·ρ·Cd·A·v². The open cup facing the wind has a higher Cd than the back of the returning cup, so the rotor settles where the two drags balance. Its spin rate then rises in proportion to wind speed, which gives a straight-line calibration.',
+    formula: 'v = air per rev × spin rate + start-up speed', feature: 'rev/s', featLabel: 'Spin rate', simKey: 'feature_rotor',
+    params: [
+      { name: 'rotor_slope', label: 'Air per revolution', value: 0.1, min: 0.03, max: 0.25, step: 0.0005, unit: 'm/rev', group: 'curve',
+        what: 'Metres of air that pass for each turn of the rotor. Scales every reading.', lo: 'reads lower', hi: 'reads higher' },
+      { name: 'rotor_offset', label: 'Start-up speed', value: 0.3, min: -1, max: 2, step: 0.005, unit: 'm/s', group: 'curve',
+        what: 'Wind needed before the rotor starts to turn. Shifts every reading up or down.', lo: 'reads lower', hi: 'reads higher' },
+      { name: 'rotor_min_hz', label: 'Stall cut-off', value: 1.5, min: 0, max: 10, step: 0.1, unit: 'rev/s', group: 'curve',
+        what: 'Below this spin rate the output reads 0 m/s.', lo: 'reports slow creep', hi: 'zero until faster' },
+      { name: 'rotor_window_ms', label: 'Rate averaging window', value: 50, min: 10, max: 250, step: 5, unit: 'ms', group: 'response', board: true,
+        what: 'How long the board counts pulses for each spin-rate reading. Takes effect after a push.', lo: 'fast, jittery', hi: 'smooth, delayed' },
+    ],
+    staticFree: ['rotor_slope', 'rotor_offset'],
+  },
+  sqrt: {
+    label: 'Drag plate', short: 'Plate', method: 'METHOD_DRAG_PLATE',
+    hint: 'The plate feels drag F = ½·ρ·Cd·A·v², measured by the load cell. Solving for speed gives v = √(2F ÷ (ρ·Cd·A)). Calibration finds the drag area Cd·A and the zero-flow force F₀ against the pitot.',
+    formula: 'v = √( 2·(F − F₀) ÷ (ρ · Cd·A) )', feature: 'N', featLabel: 'Drag force', simKey: 'feature_sqrt',
+    params: [
+      { name: 'sqrt_k', label: 'Drag area Cd·A', value: 150, min: 40, max: 400, step: 0.1, unit: '1/m²', group: 'curve',
+        // firmware stores k = 2/(Cd·A); the UI shows Cd·A in cm²
+        view: { unit: 'cm²', min: 50, max: 500, step: 0.1, to: k => 2e4 / k, from: a => 2e4 / a },
+        what: 'Drag coefficient × plate area. Larger means more force per m/s, so a given force reads as a lower speed.', lo: 'reads higher', hi: 'reads lower' },
+      { name: 'sqrt_x0', label: 'Zero-flow force F₀', value: 0, min: -0.05, max: 0.05, step: 0.0001, unit: 'N', group: 'curve',
+        what: 'Force the load cell reports with the fan off. Subtracted before the square root.', lo: 'reads higher', hi: 'reads lower' },
+      { name: 'lc_offset', label: 'Load-cell zero', value: 84000, min: 80000, max: 88000, step: 1, unit: 'counts', group: 'board', board: true,
+        what: 'Raw count with nothing on the plate. Set it with TARE (fan off), not by hand.', lo: '', hi: '' },
+      { name: 'lc_n_per_count', label: 'Load-cell scale', value: 1.0e-5, min: 0.8e-5, max: 1.2e-5, step: 1e-9, unit: 'N/count', group: 'board', board: true,
+        what: 'Newtons per raw count, from the hanging-weights routine (python -m calib weights).', lo: 'reads lower', hi: 'reads higher' },
+    ],
+    staticFree: ['sqrt_k', 'sqrt_x0'],
+  },
+};
+function dynFree() { return ['ema_alpha', 'lead_tau']; }
+// airmath::Ema clamp: α in [1e-4, 1], NaN or ≤ 0 → 1e-4
+function emaAlpha(a) { return Number.isFinite(a) && a > 0 ? Math.min(1, Math.max(1e-4, a)) : 1e-4; }
+
+function specsFor(model) { return [...MODELS[model].params, ...COMMON]; }
+function specOf(model, name) { return specsFor(model).find(s => s.name === name); }
+function dispVal(name, v, withUnit) {
+  for (const m of Object.keys(MODELS)) { const s = specOf(m, name.replace('board.', '')); if (s) { const x = s.view ? s.view.to(v) : v; return fmtP(s.view ? roundTo(x, s.view.step) : x) + (withUnit ? ' ' + (s.view ? s.view.unit : s.unit) : ''); } }
+  return fmtP(v);
+}
+function labelOf(name) { for (const m of Object.keys(MODELS)) { const s = specOf(m, name); if (s) return s.label; } return name; }
+function defaultsFor(model) { const o = {}; for (const p of specsFor(model)) o[p.name] = p.value; return o; }
+
+/* Biquad Butterworth (RBJ, Q=1/√2, TDF-II, primed) — same as airmath::ButterworthLowPass */
+function biquad(fc) {
+  if (!(fc > 0) || fc >= 0.5 * FS) return null;
+  const q = Math.SQRT1_2, w0 = 2 * Math.PI * fc / FS, cw = Math.cos(w0), al = Math.sin(w0) / (2 * q), a0 = 1 + al;
+  const b0 = (1 - cw) / 2 / a0;
+  return { b0, b1: (1 - cw) / a0, b2: b0, a1: -2 * cw / a0, a2: (1 - al) / a0 };
+}
+function staticMap(model, p, x, rho) {
+  if (!Number.isFinite(x)) return NaN;
+  if (model === 'rotor') {
+    if (!(x >= p.rotor_min_hz)) return 0;
+    const v = p.rotor_slope * x + p.rotor_offset; return v > 0 ? v : 0;
+  }
+  if (!(rho > 0)) return 0;
+  const arg = p.sqrt_k * (x - p.sqrt_x0) / rho; return arg > 0 ? Math.sqrt(arg) : 0;
+}
+function med3(a, b, c) { return Math.max(Math.min(a, b), Math.min(Math.max(a, b), c)); }
+/* Run the full on-board chain over feature[i0..i1): map → Median3 → lead → Butterworth → clamp ≥ 0 */
+function runChain(model, p, feat, rho, i0, i1, out, outOff = 0) {
+  const c = biquad(p.lpf_hz), lead = p.lead_tau * FS;
+  let prev = NaN, s1 = 0, s2 = 0, primed = false, m0 = 0, m1 = 0, mc = 0, ema = 0, ep = false;
+  const useEma = p.filter_kind >= 0.5, al = emaAlpha(p.ema_alpha);
+  for (let i = i0; i < i1; i++) {
+    const r = Number.isFinite(rho[i]) && rho[i] > 0 ? rho[i] : p.rho_ref;
+    let x = staticMap(model, p, feat[i], r);
+    if (!Number.isFinite(x)) { out[i - i0 + outOff] = NaN; continue; }
+    // Median3 (passes the first three samples through, like airmath::Median3), then lead
+    const md = mc < 3 ? x : med3(m0, m1, x); m0 = m1; m1 = x; mc++;
+    let y = Number.isFinite(prev) ? md + lead * (md - prev) : md;
+    prev = md;
+    if (useEma) { if (!ep) { ema = y; ep = true; } else ema += al * (y - ema); y = ema; }
+    else if (c) {
+      if (!primed) { s2 = y * (c.b2 - c.a2); s1 = y * (1 - c.b0); primed = true; }
+      const o = c.b0 * y + s1; s1 = c.b1 * y - c.a1 * o + s2; s2 = c.b2 * y - c.a2 * o; y = o;
+    }
+    out[i - i0 + outOff] = y > 0 ? y : 0;
+  }
+  return out;
+}
+
+/* ---------- State ---------- */
+const S = {
+  mode: 'sim', model: 'rotor',
+  params: { rotor: defaultsFor('rotor'), sqrt: defaultsFor('sqrt') },
+  board: { rotor: defaultsFor('rotor'), sqrt: defaultsFor('sqrt') },
+  hidden: { gt: false, est: false, dev: false },
+  paused: false, autoPush: false, score: 'est', c2: 'bins', c4: 'hist',
+  baseline: null, history: [], marks: [], lastFit: null, ws: null,
+};
+const B = { t: [], gt: [], dev: [], est: [], feature: [], rho: [], temp_c: [], pressure_pa: [], feature_rotor: [], feature_sqrt: [], dev_rotor: [], dev_sqrt: [] };
+const BKEYS = Object.keys(B);
+function trimBuf() { if (B.t.length > MAX_N + 2000) { const k = B.t.length - MAX_N; for (const key of BKEYS) B[key].splice(0, k); } }
+function featureArr() { return S.mode === 'sim' ? B[MODELS[S.model].simKey] : B.feature; }
+function devArr() { return S.mode === 'sim' ? B['dev_' + S.model] : B.dev; }
+function nowT() { return B.t.length ? B.t[B.t.length - 1] : 0; }
+let estDirty = true;
+function recomputeEst() {
+  const n = B.t.length, f = featureArr();
+  B.est.length = n;
+  if (n) runChain(S.model, S.params[S.model], f, B.rho, 0, n, B.est);
+  estDirty = false;
+}
+
+/* ---------- Tunnel simulator ---------- */
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const TRUE = { rotor_slope: 0.1123, rotor_offset: 0.46, rotor_curv: -0.00035, stall: 0.8, dist_const: 1.3, ppr: 20,
+  cda: 0.0115, cd_re: 0.06, plate_fn: 7.0, plate_zeta: 0.22, lc_offset: 84213, lc_n_per_count: 1.021e-5, lc_noise: 22,
+  pitot_noise_pa: 0.12, pitot_tau: 0.012 };
+TRUE.sqrt_k = 2 / TRUE.cda;
+class Sim {
+  constructor(seed = 7) { this.reset(seed); }
+  reset(seed = 7) {
+    this.rand = mulberry(seed); this.t = 0; this.n = 0; this.fan = 2; this.turb = 0; this.turb2 = 0;
+    this.rotorV = 0; this.rev = 0; this.revHist = []; this.F = 0; this.Fd = 0; this.pit = 2; this.temp = 21.4; this.press = 101180;
+    this.fanOff = false; this.loadG = 0;
+  }
+  gauss() { let u = 0, v = 0; while (!u) u = this.rand(); v = this.rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  target(t) {
+    const prof = $('simProfile').value;
+    if (prof === 'steps') { const L = [2, 4, 6, 8, 10, 7, 3, 9, 5, 2.5, 8.5, 4.5]; return L[Math.floor(t / 6) % L.length]; }
+    if (prof === 'ramps') { const ph = (t % 24) / 24; return ph < 0.5 ? 2 + 16 * ph : 10 - 16 * (ph - 0.5); }
+    if (prof === 'sweep') return 6 + 4 * Math.sin(2 * Math.PI * t / 30 - Math.PI / 2);
+    if (prof === 'gusts') { const k = Math.floor(t / 1.7); const r = mulberry(k * 977 + 3)(); return 6 + (r - 0.5) * 5; }
+    // mixed: alternating step holds and ramps, seeded
+    const k = Math.floor(t / 5), r = mulberry(k * 131 + 11), a = 2 + 8 * r(), ramp = r() < 0.35;
+    if (!ramp) return a;
+    const prev = 2 + 8 * mulberry((k - 1) * 131 + 11)();
+    return prev + (a - prev) * Math.min(1, (t - k * 5) / 3.5);
+  }
+  step(boardParams) {
+    const dt = DT; this.t += dt; this.n++;
+    const tgt = this.fanOff ? 0 : this.target(this.t);
+    this.fan += (tgt - this.fan) * (1 - Math.exp(-dt / 0.55));
+    if (this.fanOff && this.fan < 0.02) this.fan = 0;
+    const ti = +$('simTurb').value;
+    this.turb += (-this.turb * 18 + this.gauss() * 60) * dt;           // ~3 Hz coloured noise
+    this.turb2 += (-this.turb2 * 1.2 + this.gauss() * 1.4) * dt;       // slow drift
+    const v = Math.max(0, this.fan * (1 + ti * this.turb + 0.4 * ti * this.turb2));
+    this.temp += (21.4 + 0.6 * Math.sin(this.t / 90) - this.temp) * 0.0005 + this.gauss() * 0.0004;
+    this.press += this.gauss() * 0.3;
+    const rho = this.press / (287.058 * (this.temp + 273.15));
+    // Ground truth: Dwyer pitot (pressure noise, short lag) → v
+    const dp = 0.5 * rho * v * v + this.gauss() * TRUE.pitot_noise_pa;
+    this.pit += (Math.sign(dp) * Math.sqrt(2 * Math.abs(dp) / rho) - this.pit) * (1 - Math.exp(-dt / TRUE.pitot_tau));
+    // Rotor: inertia with distance constant, encoder quantisation over a sliding window
+    const fEq = v < TRUE.stall ? 0 : Math.max(0, (v - TRUE.rotor_offset) / TRUE.rotor_slope * (1 + TRUE.rotor_curv * v * v));
+    const tauR = TRUE.dist_const / Math.max(v, 0.6);
+    this.rotorV += (fEq - this.rotorV) * (1 - Math.exp(-dt / tauR));
+    this.rev += this.rotorV * dt;
+    const pulses = Math.floor(this.rev * TRUE.ppr);
+    this.revHist.push(pulses); if (this.revHist.length > 60) this.revHist.shift();
+    const winN = Math.max(1, Math.min(this.revHist.length - 1, Math.round(boardParams.rotor.rotor_window_ms / 1000 / dt)));
+    const fRotor = this.revHist.length > winN ? (this.revHist[this.revHist.length - 1] - this.revHist[this.revHist.length - 1 - winN]) / TRUE.ppr / (winN * dt) : 0;
+    // Drag plate: Re-dependent Cd, 2nd-order mount, NAU7802 counts → board lc params → N
+    const Fst = 0.5 * rho * TRUE.cda * (1 + TRUE.cd_re * (3 / (v + 1) - 0.4)) * v * v + this.loadG / 1000 * 9.80665;
+    const wn = 2 * Math.PI * TRUE.plate_fn;
+    this.Fd += (wn * wn * (Fst - this.F) - 2 * TRUE.plate_zeta * wn * this.Fd) * dt;
+    this.F += this.Fd * dt;
+    const counts = Math.round(TRUE.lc_offset + this.F / TRUE.lc_n_per_count + this.gauss() * TRUE.lc_noise);
+    const fSqrt = (counts - boardParams.sqrt.lc_offset) * boardParams.sqrt.lc_n_per_count;
+    return { t: this.t, gt: this.pit, rho, temp: this.temp, press: this.press, fRotor, fSqrt };
+  }
+}
+const sim = new Sim();
+const freshChain = () => ({ prev: NaN, s1: 0, s2: 0, primed: false, mc: 0, m0: 0, m1: 0, ema: 0, ep: false, fk: undefined });
+const simChain = { rotor: freshChain(), sqrt: freshChain() };
+function chainStep(model, p, st, x, rho) {
+  // incremental version of runChain (same order: map → Median3 → lead → LPF → clamp)
+  const c = biquad(p.lpf_hz);
+  let y = staticMap(model, p, x, rho > 0 ? rho : p.rho_ref);
+  if (!Number.isFinite(y)) return NaN;   // like runChain: a missing sample leaves the filter state alone
+  const lead = p.lead_tau * FS;
+  const md = st.mc < 3 ? y : med3(st.m0, st.m1, y); st.m0 = st.m1; st.m1 = y; st.mc++; y = md;
+  const z = Number.isFinite(st.prev) ? y + lead * (y - st.prev) : y; st.prev = y; y = z;
+  const fk = p.filter_kind >= 0.5;
+  if (st.fk !== undefined && st.fk !== fk) { st.ep = false; st.primed = false; }   // switching filters re-primes both, like the board
+  st.fk = fk;
+  if (fk) { if (!st.ep) { st.ema = y; st.ep = true; } else st.ema += emaAlpha(p.ema_alpha) * (y - st.ema); y = st.ema; }
+  else if (c) {
+    if (!st.primed) { st.s2 = y * (c.b2 - c.a2); st.s1 = y * (1 - c.b0); st.primed = true; }
+    const o = c.b0 * y + st.s1; st.s1 = c.b1 * y - c.a1 * o + st.s2; st.s2 = c.b2 * y - c.a2 * o; y = o;
+  }
+  return y > 0 ? y : 0;
+}
+function simPush(s) {
+  B.t.push(s.t); B.gt.push(s.gt); B.rho.push(s.rho); B.temp_c.push(s.temp); B.pressure_pa.push(s.press);
+  B.feature_rotor.push(s.fRotor); B.feature_sqrt.push(s.fSqrt); B.feature.push(S.model === 'rotor' ? s.fRotor : s.fSqrt);
+  B.dev_rotor.push(chainStep('rotor', S.board.rotor, simChain.rotor, s.fRotor, s.rho));
+  B.dev_sqrt.push(chainStep('sqrt', S.board.sqrt, simChain.sqrt, s.fSqrt, s.rho));
+  B.dev.push(S.model === 'rotor' ? B.dev_rotor[B.dev_rotor.length - 1] : B.dev_sqrt[B.dev_sqrt.length - 1]);
+}
+let simLast = performance.now(), simAcc = 0;
+function simTick() {
+  const now = performance.now(); let el = (now - simLast) / 1000; simLast = now;
+  if (S.paused) return;
+  simAcc += Math.min(el, 0.25);
+  const steps = Math.floor(simAcc * FS); simAcc -= steps / FS;
+  const start = B.t.length;
+  for (let k = 0; k < steps; k++) { simPush(sim.step(S.board)); tele.sensN++; tele.gtN++; }
+  appendEst(start);
+  recCapture(start);
+  trimBuf();
+}
+// incremental est with persistent state for appended samples
+const estState = freshChain();
+function appendEst(start) {
+  if (estDirty) { recomputeEst(); resetEstState(); return; }
+  const f = featureArr(), p = S.params[S.model];
+  for (let i = start; i < B.t.length; i++) B.est[i] = chainStep(S.model, p, estState, f[i], B.rho[i]);
+}
+function resetEstState() {
+  // rebuild filter state by replaying the last two seconds
+  Object.assign(estState, freshChain());
+  const f = featureArr(), p = S.params[S.model], n = B.t.length;
+  for (let i = Math.max(0, n - FS * 2); i < n; i++) chainStep(S.model, p, estState, f[i], B.rho[i]);
+}
+function markParamsChanged(label) { estDirty = true; S.marks.push({ t: nowT(), label }); if (S.marks.length > 60) S.marks.shift(); scheduleMetrics(); }
+
+/* ---------- Telemetry counters ---------- */
+const tele = { sensN: 0, gtN: 0, sensHz: 0, gtHz: 0, drops: 0, t0: performance.now() };
+setInterval(() => {
+  const el = (performance.now() - tele.t0) / 1000; tele.t0 = performance.now();
+  if (S.mode === 'sim' || !S.serverTele) { tele.sensHz = tele.sensN / el; tele.gtHz = tele.gtN / el; }
+  tele.sensN = 0; tele.gtN = 0;
+  renderTele();
+}, 1000);
+
+/* ---------- Metrics ---------- */
+function windowIdx(sec) { const n = B.t.length; if (!n) return [0, 0]; const t0 = B.t[n - 1] - sec; let lo = 0, hi = n - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (B.t[m] < t0) lo = m + 1; else hi = m; } return [lo, n]; }
+function metrics(est, gt, i0, i1) {
+  let n = 0, se = 0, sb = 0, sa = 0, mx = 0, sg = 0, sg2 = 0;
+  for (let i = i0; i < i1; i++) { const e = est[i], g = gt[i]; if (!Number.isFinite(e) || !Number.isFinite(g)) continue; const d = e - g; n++; se += d * d; sb += d; sa += Math.abs(d); if (Math.abs(d) > mx) mx = Math.abs(d); sg += g; sg2 += g * g; }
+  if (n < 10) return null;
+  const mse = se / n, bias = sb / n, varg = sg2 / n - (sg / n) ** 2;
+  return { n, mse, rmse: Math.sqrt(mse), bias, sigma: Math.sqrt(Math.max(0, mse - bias * bias)), mae: sa / n, max_abs: mx, r2: varg > 1e-9 ? 1 - mse / varg : NaN, lag_ms: xcorrLag(est, gt, i0, i1) };
+}
+function xcorrLag(est, gt, i0, i1) {
+  // lag of est behind gt, −50…500 ms, on smoothed first differences (sharper peak)
+  const n = i1 - i0; if (n < FS * 3) return NaN;
+  const de = new Float64Array(n), dg = new Float64Array(n);
+  for (let i = 1; i < n; i++) { const a = est[i0 + i] - est[i0 + i - 1], b = gt[i0 + i] - gt[i0 + i - 1]; de[i] = Number.isFinite(a) ? a : 0; dg[i] = Number.isFinite(b) ? b : 0; }
+  const sm = a => { const o = new Float64Array(n); let s = 0; const w = 5; for (let i = 0; i < n; i++) { s += a[i] - (i >= w ? a[i - w] : 0); o[i] = s / w; } return o; };
+  const e = sm(de), g = sm(dg);
+  let best = -Infinity, bl = 0;
+  for (let L = -10; L <= 100; L++) { let s = 0; for (let i = Math.max(0, -L); i < n - Math.max(0, L); i++) s += e[i + L] * g[i]; if (s > best) { best = s; bl = L; } }
+  return bl * 1000 / FS;
+}
+let curMet = null, devMet = null, metTimer = 0;
+function scheduleMetrics() { clearTimeout(metTimer); metTimer = setTimeout(computeMetrics, 60); }
+function computeMetrics() {
+  if (estDirty) recomputeEst();
+  const [i0, i1] = windowIdx(+$('metWin').value);
+  curMet = metrics(B.est, B.gt, i0, i1);
+  devMet = metrics(devArr(), B.gt, i0, i1);
+  renderTiles();
+}
+setInterval(() => { if (!S.paused) computeMetrics(); }, 500);
+setInterval(() => { if (S.paused) return; const m = S.score === 'dev' ? devMet : curMet; if (m && B.t.length) { S.history.push({ t: nowT(), mse: m.mse }); if (S.history.length > 400) S.history.shift(); } }, 2000);
+
+/* ---------- Session recording ----------
+   Every sample after Start is copied out of the rolling buffer, tagged with the segment (parameter set)
+   in force. Any change to the PC or board settings closes the segment and opens a new one. */
+const REC = { on: false, started: null, stopped: null, lastT: -Infinity, cols: null, psets: [], events: [], server: null, profile: null };
+const REC_COLS = ['t', 'gt', 'pc', 'board', 'feature', 'rho', 'temp_c', 'pressure_pa', 'seg'];
+function recSnapshot() { return { model: S.model, params: { ...S.params[S.model] }, board: { ...S.board[S.model] } }; }
+function recDiff(a, b) {
+  const out = {};
+  if (a.model !== b.model) out.model = [a.model, b.model];
+  for (const k of new Set([...Object.keys(a.params), ...Object.keys(b.params)])) if (a.params[k] !== b.params[k]) out[k] = [a.params[k], b.params[k]];
+  for (const k of new Set([...Object.keys(a.board), ...Object.keys(b.board)])) if (a.board[k] !== b.board[k]) out['board.' + k] = [a.board[k], b.board[k]];
+  return out;
+}
+function recStart() {
+  const t = nowT();
+  Object.assign(REC, { on: true, started: new Date().toISOString(), stopped: null, lastT: t, server: null, profile: S.mode === 'sim' ? $('simProfile').value : null,
+    cols: Object.fromEntries(REC_COLS.map(c => [c, []])), events: [], psets: [{ seg: 0, t_start: t, t_end: null, i0: 0, cause: 'start', changed: {}, ...recSnapshot() }] });
+  REC.events.push({ t, kind: 'start', detail: `model ${S.model}, ${S.mode}` });
+  send({ type: 'record', on: true, label: S.model });
+  log('Recording started', 'ok'); renderRec();
+}
+function recStop() {
+  if (!REC.on) return;
+  REC.on = false; REC.stopped = new Date().toISOString();
+  const last = REC.psets[REC.psets.length - 1]; last.t_end = REC.lastT;
+  REC.events.push({ t: REC.lastT, kind: 'stop' });
+  send({ type: 'record', on: false });
+  log(`Recording stopped: ${REC.cols.t.length} samples, ${REC.psets.length} segments`, 'ok'); renderRec();
+}
+function recCapture(i0) {
+  if (!REC.on) return;
+  const d = devArr(), f = featureArr(), C_ = REC.cols, seg = REC.psets.length - 1;
+  for (let i = Math.max(0, i0); i < B.t.length; i++) {
+    if (!(B.t[i] > REC.lastT)) continue;
+    C_.t.push(B.t[i]); C_.gt.push(B.gt[i]); C_.pc.push(B.est[i]); C_.board.push(d[i]); C_.feature.push(f[i]);
+    C_.rho.push(B.rho[i]); C_.temp_c.push(B.temp_c[i]); C_.pressure_pa.push(B.pressure_pa[i]); C_.seg.push(seg);
+    REC.lastT = B.t[i];
+  }
+}
+/* Call after any change: logs the event and, if settings differ from the open segment, starts a new one. */
+function recMark(kind, detail) {
+  if (!REC.on) return;
+  const cur = REC.psets[REC.psets.length - 1], snap = recSnapshot(), changed = recDiff(cur, snap), t = nowT();
+  const names = Object.keys(changed);
+  REC.events.push({ t, kind, detail: detail || null, changes: names.length ? changed : undefined });
+  if (names.length) {
+    cur.t_end = t;
+    REC.psets.push({ seg: REC.psets.length, t_start: t, t_end: null, i0: REC.cols.t.length, cause: kind, changed, ...snap });
+  }
+  renderRec();
+}
+function recNote(text) { if (!REC.on || !text) return; REC.events.push({ t: nowT(), kind: 'note', detail: text }); send({ type: 'note', text }); log('Note: ' + text); renderRec(); }
+function segStats(p, k) {
+  const C_ = REC.cols, i1 = k + 1 < REC.psets.length ? REC.psets[k + 1].i0 : C_.t.length;
+  let i0 = p.i0; while (i0 < i1 && C_.t[i0] < p.t_start + WARM_S) i0++;
+  return { i0: p.i0, i1, n: i1 - i0, dur: i1 > p.i0 ? C_.t[i1 - 1] - C_.t[p.i0] : 0, pc: metrics(C_.pc, C_.gt, i0, i1), board: metrics(C_.board, C_.gt, i0, i1) };
+}
+function changeText(ch) {
+  const ks = Object.keys(ch || {}); if (!ks.length) return 'start';
+  return ks.map(k => k === 'model' ? `sensor → ${MODELS[ch.model[1]]?.label || ch.model[1]}` : `${labelOf(k.replace('board.', ''))}${k.startsWith('board.') ? ' (board)' : ''} ${dispVal(k, ch[k][0])} → ${dispVal(k, ch[k][1], true)}`).join('; ');
+}
+function renderRec() {
+  const on = REC.on, has = !!REC.cols && REC.cols.t.length > 0;
+  for (const id of ['btnRec', 'btnRecTop']) $(id).classList.toggle('on', on);
+  $('recTxt').textContent = on ? 'Stop recording' : has ? 'Start new recording' : 'Start recording';
+  $('recTopTxt').textContent = on ? 'Stop' : 'Record';
+  $('recBadge').hidden = !on;
+  $('btnSaveCsv').disabled = $('btnSaveJson').disabled = !has;
+  if (!REC.cols) return;
+  const n = REC.cols.t.length, dur = n ? REC.cols.t[n - 1] - REC.cols.t[0] : 0;
+  $('rsTime').textContent = `${Math.floor(dur / 60)}:${String(Math.floor(dur % 60)).padStart(2, '0')}`;
+  $('rsRows').textContent = n.toLocaleString();
+  $('rsSegs').textContent = REC.psets.length;
+  $('recPath').textContent = REC.server?.path ? 'PC copy: ' + String(REC.server.path).split('/').slice(-2).join('/') : '';
+  const metric = S.score === 'dev' ? 'board' : 'pc';
+  let prev = null;
+  const rows = REC.psets.map((p, k) => {
+    const st = segStats(p, k), m = st[metric];
+    const d = m && prev ? `<span class="${m.mse < prev.mse ? 'delta-good' : 'delta-bad'}">${pct(m.mse, prev.mse)}</span>` : '–';
+    if (m) prev = m;
+    return `<tr class="${k === REC.psets.length - 1 && on ? 'cur' : ''}"><td>${k}</td><td>${st.dur.toFixed(1)} s</td><td class="wrap">${changeText(p.changed)}</td><td>${m ? m.mse.toFixed(4) : '–'}</td><td>${d}</td></tr>`;
+  });
+  $('segTbl').querySelector('tbody').innerHTML = rows.reverse().join('');
+  $('segHint').hidden = REC.psets.length > 1;
+}
+setInterval(() => { if (REC.on) renderRec(); }, 1000);
+function allParamNames() { const s = new Set(); for (const p of REC.psets) { Object.keys(p.params).forEach(k => s.add(k)); } return [...s]; }
+function allBoardNames() { const s = new Set(); for (const p of REC.psets) { Object.keys(p.board).forEach(k => s.add(k)); } return [...s]; }
+const r7 = v => Number.isFinite(v) ? +v.toPrecision(7) : '';
+function buildCsv() {
+  const C_ = REC.cols, pn = allParamNames(), bn = allBoardNames();
+  const head = ['t_s', 'gt_mps', 'pc_mps', 'board_mps', 'pc_err_mps', 'board_err_mps', 'feature', 'rho_kgm3', 'temp_c', 'pressure_pa', 'segment', 'model', ...pn.map(k => 'pc_' + k), ...bn.map(k => 'board_' + k)];
+  const segCells = REC.psets.map(p => [p.model, ...pn.map(k => r7(p.params[k])), ...bn.map(k => r7(p.board[k]))].join(','));
+  const out = [head.join(',')];
+  for (let i = 0; i < C_.t.length; i++) {
+    const g = C_.gt[i], pc = C_.pc[i], bd = C_.board[i];
+    out.push([C_.t[i].toFixed(4), r7(g), r7(pc), r7(bd), r7(pc - g), r7(bd - g), r7(C_.feature[i]), r7(C_.rho[i]), r7(C_.temp_c[i]), r7(C_.pressure_pa[i]), C_.seg[i], segCells[C_.seg[i]]].join(','));
+  }
+  return out.join('\n') + '\n';
+}
+function buildJson() {
+  const C_ = REC.cols, n = C_.t.length;
+  const segments = REC.psets.map((p, k) => { const st = segStats(p, k); return { segment: k, t_start: p.t_start, t_end: p.t_end ?? (n ? C_.t[n - 1] : null), duration_s: st.dur, n_scored: st.n, cause: p.cause, changed: p.changed, metrics_pc: st.pc, metrics_board: st.board }; });
+  const doc = {
+    format: 'airspeed-calibration-session/1',
+    meta: { mode: S.mode, model_at_start: REC.psets[0].model, method: S.serverMethod || null, started: REC.started, stopped: REC.stopped, fs_hz: FS, warmup_s: WARM_S, sim_profile: REC.profile, source: 'dashboard',
+      columns: { t: 's (stream time)', gt: 'ground truth m/s', pc: 'PC preview m/s with the segment\'s settings', board: 'board output m/s', feature: MODELS[REC.psets[0].model].feature, rho: 'kg/m³', temp_c: '°C', pressure_pa: 'Pa', seg: 'segment index' } },
+    param_sets: REC.psets.map(p => ({ segment: p.seg, t_start: p.t_start, t_end: p.t_end, model: p.model, cause: p.cause, changed: p.changed, params: p.params, board: p.board })),
+    events: REC.events, segments,
+    summary: { samples: n, duration_s: n ? C_.t[n - 1] - C_.t[0] : 0, metrics_pc: metrics(C_.pc, C_.gt, 0, n), metrics_board: metrics(C_.board, C_.gt, 0, n) },
+    samples: Object.fromEntries(REC_COLS.map(c => [c, C_[c].map(v => Number.isFinite(v) ? +v.toPrecision(7) : null)])),
+  };
+  return JSON.stringify(doc);
+}
+async function saveFile(name, text) {
+  const blob = new Blob([text], { type: name.endsWith('.json') ? 'application/json' : 'text/plain' });
+  try {
+    if (window.claude && typeof window.claude.use === 'function') {
+      const dl = await window.claude.use('downloads');
+      if (dl) { await dl.save({ filename: name, data: blob }); return `Saved ${name}`; }
+    }
+  } catch (e) { return e && e.code === 'declined' ? 'Save cancelled' : `Could not save: ${e && (e.message || e.code)}`; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  return `Downloaded ${name}`;
+}
+function recName(ext) { const d = new Date(REC.started || Date.now()); const p = n => String(n).padStart(2, '0'); return `session_${REC.psets[0]?.model || S.model}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`; }
+const toggleRec = () => REC.on ? recStop() : recStart();
+$('btnRec').onclick = toggleRec; $('btnRecTop').onclick = toggleRec;
+$('btnNote').onclick = () => { recNote($('noteIn').value.trim()); $('noteIn').value = ''; };
+$('noteIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnNote').click(); });
+$('btnSaveCsv').onclick = async () => { $('saveMsg').textContent = 'Preparing…'; $('saveMsg').textContent = await saveFile(recName('csv'), buildCsv()); };
+$('btnSaveJson').onclick = async () => { $('saveMsg').textContent = 'Preparing…'; $('saveMsg').textContent = await saveFile(recName('json'), buildJson()); };
+
+/* ---------- Fitting (browser): bounded Nelder–Mead in normalised space ---------- */
+function fitObjective(model, base, free, specs, data, loss) {
+  const n = data.feat.length, out = new Float64Array(n);
+  return u => {
+    const p = { ...base };
+    free.forEach((k, j) => { const s = specs[k]; p[k] = s.min + Math.min(1, Math.max(0, u[j])) * (s.max - s.min); });
+    runChain(model, p, data.feat, data.rho, 0, n, out);
+    let acc = 0, m = 0;
+    for (let i = data.warm; i < n; i++) { const g = data.gt[i]; if (!Number.isFinite(g) || !Number.isFinite(out[i])) continue; const r = out[i] - g; acc += loss === 'robust_lsq' ? 2 * (Math.sqrt(1 + (r / 0.25) ** 2) - 1) * 0.0625 : r * r; m++; }
+    let pen = 0; for (const x of u) { if (x < 0) pen += x * x; if (x > 1) pen += (x - 1) ** 2; }
+    return m ? acc / m + pen * 10 : 1e9;
+  };
+}
+function nelderMead(f, x0, { iters = 500, step = 0.08, tol = 1e-10 } = {}) {
+  const d = x0.length; let P = [x0.slice()];
+  for (let i = 0; i < d; i++) { const x = x0.slice(); x[i] += x[i] + step > 1 ? -step : step; P.push(x); }
+  let F = P.map(f); const hist = [];
+  for (let it = 0; it < iters; it++) {
+    const idx = F.map((v, i) => i).sort((a, b) => F[a] - F[b]); P = idx.map(i => P[i]); F = idx.map(i => F[i]);
+    hist.push(F[0]);
+    if (Math.abs(F[d] - F[0]) < tol * (1 + Math.abs(F[0]))) break;
+    const c = new Array(d).fill(0); for (let i = 0; i < d; i++) for (let j = 0; j < d; j++) c[j] += P[i][j] / d;
+    const at = (a) => c.map((cj, j) => cj + a * (P[d][j] - cj));
+    const xr = at(-1), fr = f(xr);
+    if (fr < F[0]) { const xe = at(-2), fe = f(xe); if (fe < fr) { P[d] = xe; F[d] = fe; } else { P[d] = xr; F[d] = fr; } }
+    else if (fr < F[d - 1]) { P[d] = xr; F[d] = fr; }
+    else { const xc = fr < F[d] ? at(-0.5) : at(0.5), fc = f(xc);
+      if (fc < Math.min(fr, F[d])) { P[d] = xc; F[d] = fc; }
+      else { for (let i = 1; i <= d; i++) { P[i] = P[i].map((v, j) => P[0][j] + 0.5 * (v - P[0][j])); F[i] = f(P[i]); } } }
+  }
+  const b = F.indexOf(Math.min(...F)); return { x: P[b], f: F[b], hist };
+}
+function browserFit() {
+  const model = S.model, specs = Object.fromEntries(specsFor(model).map(s => [s.name, s]));
+  const free = [...document.querySelectorAll('#freeChips input:checked')].map(i => i.dataset.p);
+  if (!free.length) { setFitStatus('Tick at least one setting to fit.', 'w'); return; }
+  const [i0, i1] = windowIdx(+$('fitWin').value);
+  if (i1 - i0 < FS * 8) { setFitStatus('Need at least 8 s of data.', 'w'); return; }
+  const f = featureArr(), split = i0 + Math.floor((i1 - i0) * 0.7), warm = FS;
+  const slice = (a, b) => ({ feat: f.slice(Math.max(0, a - warm), b), rho: B.rho.slice(Math.max(0, a - warm), b), gt: B.gt.slice(Math.max(0, a - warm), b), warm: a - Math.max(0, a - warm) });
+  const train = slice(i0, split), test = slice(split, i1);
+  const base = { ...S.params[model] }, method = $('fitMethod').value;
+  const obj = fitObjective(model, base, free, specs, train, method);
+  const u0 = free.map(k => (base[k] - specs[k].min) / (specs[k].max - specs[k].min));
+  const t0 = performance.now();
+  let best = nelderMead(obj, u0, { iters: 600 });
+  const r2 = nelderMead(obj, best.x, { iters: 400, step: 0.03 }); r2.hist = best.hist.concat(r2.hist); if (r2.f <= best.f) best = r2; else best.hist = r2.hist;
+  const after = { ...base }; free.forEach((k, j) => { const s = specs[k]; after[k] = roundTo(s.min + Math.min(1, Math.max(0, best.x[j])) * (s.max - s.min), s.step); });
+  const score = (p, d) => { const o = new Float64Array(d.feat.length); runChain(model, p, d.feat, d.rho, 0, d.feat.length, o); return metrics(o, d.gt, d.warm, d.feat.length); };
+  const res = { method, params: Object.fromEntries(free.map(k => [k, after[k]])), before: score(base, train), after: score(after, train), holdBefore: score(base, test), holdAfter: score(after, test), ms: performance.now() - t0, hist: best.hist, free, engine: 'browser' };
+  applyFit(res);
+}
+function roundTo(v, step) { const d = Math.max(0, -Math.floor(Math.log10(step)) + 1); return +v.toFixed(Math.min(12, d)); }
+function applyFit(res) {
+  const model = S.model, prev = res.prev ? { ...S.params[model], ...res.prev } : { ...S.params[model] };
+  Object.assign(S.params[model], res.params);
+  S.lastFit = { ...res, prev };
+  buildParams(); markParamsChanged('fit'); maybeAutoPush(Object.keys(res.params));
+  recMark('fit', `${res.method} (${res.engine})`);
+  if (ST.pendingFit) { ST[ST.pendingFit] = true; ST.pendingFit = null; renderSteps(); }
+  renderFitResult();
+  const mb = res.holdBefore || res.before, ma = res.holdAfter || res.after;
+  setFitStatus(`Done in ${Math.round(res.ms || 0)} ms`, 'ok');
+  log(ma && mb ? `Fit ${res.method}: holdout MSE ${fmt(mb.mse, 4)} → ${fmt(ma.mse, 4)}` : `Fit ${res.method} applied`, 'ok');
+}
+function renderFitResult() {
+  const r = S.lastFit; if (!r) { $('fitRes').innerHTML = ''; $('cvConv').hidden = true; return; }
+  const rows = r.free.map(k => `<tr><td class="wrap">${labelOf(k)}</td><td>${dispVal(k, r.prev[k])}</td><td>${dispVal(k, r.params[k], true)}</td></tr>`).join('');
+  const mrow = (lbl, a, b) => { if (!a || !b) return ''; const g = b.mse < a.mse; return `<tr><td>${lbl}</td><td>${fmt(a.mse, 4)}</td><td class="${g ? 'delta-good' : 'delta-bad'}">${fmt(b.mse, 4)} (${pct(b.mse, a.mse)})</td></tr>`; };
+  $('fitRes').innerHTML = `<table><thead><tr><th>Setting</th><th>Before</th><th>After</th></tr></thead><tbody>${rows}</tbody></table>
+    <table style="margin-top:6px"><thead><tr><th>MSE</th><th>Before</th><th>After</th></tr></thead><tbody>${mrow('Fit data', r.before, r.after)}${mrow('Holdout', r.holdBefore, r.holdAfter)}</tbody></table>
+    <div class="row" style="margin-top:6px"><button class="btn sm" id="btnUndoFit">Undo fit</button></div>`;
+  $('btnUndoFit').onclick = () => { Object.assign(S.params[S.model], r.prev); sendParams(r.prev); S.lastFit = null; buildParams(); markParamsChanged('undo'); recMark('undo', 'fit undone'); renderFitResult(); log('Fit undone'); };
+  if (r.hist && r.hist.length > 2) { $('cvConv').hidden = false; drawConv(r.hist); } else $('cvConv').hidden = true;
+}
+function setFitStatus(t, cls) { const el = $('fitStatus'); el.textContent = t; el.className = 'hint ' + (cls || ''); }
+
+/* ---------- Canvas plotting ---------- */
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let C = {};
+function readColors() { C = { gt: css('--gt'), est: css('--est'), dev: css('--dev'), ink: css('--ink'), muted: css('--muted'), faint: css('--faint'), grid: css('--grid'), line: css('--line'), good: css('--good'), bad: css('--bad'), warn: css('--warn'), accent: css('--accent'), panel: css('--panel'), sunk: css('--sunk') }; }
+function setup(cv) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h); return { ctx, w, h };
+}
+function nice(lo, hi, n = 5) {
+  if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
+  const raw = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(raw)), st = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || raw;
+  const out = []; for (let v = Math.ceil(lo / st) * st; v <= hi + st * 1e-9; v += st) out.push(+v.toFixed(10)); return { ticks: out, step: st };
+}
+function frame(ctx, w, h, xr, yr, o = {}) {
+  const pad = { l: o.l ?? 40, r: o.r ?? 8, t: o.t ?? 6, b: o.b ?? 18 };
+  const X = v => pad.l + (v - xr[0]) / (xr[1] - xr[0]) * (w - pad.l - pad.r);
+  const Y = v => h - pad.b - (v - yr[0]) / (yr[1] - yr[0]) * (h - pad.t - pad.b);
+  ctx.font = '10px ' + css('--f-mono'); ctx.lineWidth = 1;
+  const yn = o.yn || Math.max(2, Math.min(6, Math.floor((h - pad.t - pad.b) / 32)));
+  const yt = nice(yr[0], yr[1], yn), xt = nice(xr[0], xr[1], o.xn || Math.max(3, Math.floor((w - pad.l) / 70)));
+  ctx.strokeStyle = C.grid; ctx.fillStyle = C.faint; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (const v of yt.ticks) { if (v < yr[0] || v > yr[1]) continue; const y = Math.round(Y(v)) + 0.5; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke(); ctx.fillText(o.yfmt ? o.yfmt(v) : trimNum(v), pad.l - 5, y); }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  if (!o.noX) for (const v of xt.ticks) { if (v < xr[0] || v > xr[1]) continue; const x = Math.round(X(v)) + 0.5; ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke(); ctx.fillText(o.xfmt ? o.xfmt(v) : trimNum(v), x, h - pad.b + 4); }
+  ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(pad.l + 0.5, pad.t); ctx.lineTo(pad.l + 0.5, h - pad.b + 0.5); ctx.lineTo(w - pad.r, h - pad.b + 0.5); ctx.stroke();
+  if (o.ylab) { ctx.save(); ctx.fillStyle = C.faint; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(o.ylab, pad.l + 4, pad.t); ctx.restore(); }
+  if (o.xlab) { ctx.save(); ctx.fillStyle = C.faint; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(o.xlab, w - pad.r, h - pad.b - 3); ctx.restore(); }
+  return { X, Y, pad };
+}
+function trimNum(v) { const a = Math.abs(v); return a >= 1000 ? (v / 1000).toFixed(a >= 10000 ? 0 : 1) + 'k' : a >= 10 ? v.toFixed(0) : a >= 1 ? +v.toFixed(2) + '' : +v.toPrecision(2) + ''; }
+// min/max decimated polyline over index range
+function line(ctx, X, Y, xs, ys, i0, i1, color, width = 1.4, w) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.beginPath();
+  const n = i1 - i0, per = Math.max(1, Math.floor(n / (w * 1.5)));
+  let pen = false;
+  for (let i = i0; i < i1; i += per) {
+    let lo = Infinity, hi = -Infinity, ilo = i, ihi = i;
+    for (let j = i; j < Math.min(i1, i + per); j++) { const v = ys[j]; if (!Number.isFinite(v)) continue; if (v < lo) { lo = v; ilo = j; } if (v > hi) { hi = v; ihi = j; } }
+    if (lo === Infinity) { pen = false; continue; }
+    const a = ilo < ihi ? [ilo, ihi] : [ihi, ilo];
+    for (const k of (per === 1 ? [i] : a)) { const x = X(xs[k]), y = Y(ys[k]); if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; } }
+  }
+  ctx.stroke();
+}
+function emptyMsg(ctx, w, h, m) { ctx.fillStyle = C.faint; ctx.font = '12px ' + css('--f-display'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(m, w / 2, h / 2); }
+function drawTs() {
+  const cv = $('cvTs'), { ctx, w, h } = setup(cv), n = B.t.length;
+  if (!n) return emptyMsg(ctx, w, h, 'Waiting for samples…');
+  const win = +$('tsWin').value, tEnd = B.t[n - 1], [i0] = windowIdx(win), i1 = n;
+  let hi = 11;
+  for (let i = i0; i < i1; i++) { for (const a of [B.gt, B.est]) { const v = a[i]; if (Number.isFinite(v) && v > hi) hi = v; } }
+  const { X, Y, pad } = frame(ctx, w, h, [tEnd - win, tEnd], [0, Math.ceil(hi + 0.5)], { xfmt: v => (v - tEnd).toFixed(0) + 's', ylab: 'm/s' });
+  const d = devArr();
+  ctx.save(); ctx.beginPath(); ctx.rect(pad.l, 0, w - pad.l - pad.r, h); ctx.clip();
+  // recording segments as alternating bands
+  if (REC.cols && REC.psets.length) REC.psets.forEach((p, k) => { const a = Math.max(p.t_start, tEnd - win), b = p.t_end ?? tEnd; if (b < tEnd - win || k % 2 === 0) return; ctx.fillStyle = C.accent; ctx.globalAlpha = 0.05; ctx.fillRect(X(a), pad.t, X(b) - X(a), h - pad.t - pad.b); ctx.globalAlpha = 1; });
+  for (const m of S.marks) { if (m.t < tEnd - win || m.t > tEnd) continue; const x = X(m.t); ctx.strokeStyle = C.accent; ctx.globalAlpha = 0.45; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  if (!S.hidden.dev && d.some(Number.isFinite)) line(ctx, X, Y, B.t, d, i0, i1, C.dev, 1.2, w);
+  if (!S.hidden.gt) line(ctx, X, Y, B.t, B.gt, i0, i1, C.gt, 1.6, w);
+  if (!S.hidden.est) line(ctx, X, Y, B.t, B.est, i0, i1, C.est, 1.6, w);
+  ctx.restore();
+  hoverOverlay(ctx, w, h, X, Y, pad, i0, i1, tEnd, win);
+  // error trace
+  const E = setup($('cvErr'));
+  let emax = 0.3; for (let i = i0; i < i1; i++) { const e = B.est[i] - B.gt[i]; if (Number.isFinite(e) && Math.abs(e) > emax) emax = Math.abs(e); }
+  emax = Math.min(5, emax * 1.1);
+  const F = frame(E.ctx, E.w, E.h, [tEnd - win, tEnd], [-emax, emax], { yn: 2, noX: true, b: 4, ylab: 'error (preview − truth) m/s' });
+  E.ctx.save(); E.ctx.beginPath(); E.ctx.rect(F.pad.l, 0, E.w - F.pad.l - F.pad.r, E.h); E.ctx.clip();
+  E.ctx.strokeStyle = C.faint; E.ctx.beginPath(); E.ctx.moveTo(F.pad.l, F.Y(0) + 0.5); E.ctx.lineTo(E.w, F.Y(0) + 0.5); E.ctx.stroke();
+  const err = new Float64Array(i1 - i0); for (let i = i0; i < i1; i++) err[i - i0] = B.est[i] - B.gt[i];
+  E.ctx.fillStyle = C.est; E.ctx.globalAlpha = 0.18; E.ctx.beginPath(); E.ctx.moveTo(F.X(B.t[i0]), F.Y(0));
+  const per = Math.max(1, Math.floor((i1 - i0) / E.w)); for (let i = i0; i < i1; i += per) { const v = err[i - i0]; if (Number.isFinite(v)) E.ctx.lineTo(F.X(B.t[i]), F.Y(v)); }
+  E.ctx.lineTo(F.X(B.t[i1 - 1]), F.Y(0)); E.ctx.fill(); E.ctx.globalAlpha = 1;
+  line(E.ctx, F.X, F.Y, B.t.slice(i0, i1), err, 0, i1 - i0, C.est, 1.1, E.w);
+  if (view.hx != null) { E.ctx.strokeStyle = C.muted; E.ctx.beginPath(); E.ctx.moveTo(view.hx, 0); E.ctx.lineTo(view.hx, E.h); E.ctx.stroke(); }
+  E.ctx.restore();
+}
+const view = { hx: null };
+function hoverOverlay(ctx, w, h, X, Y, pad, i0, i1, tEnd, win) {
+  if (view.hx == null || view.hx < pad.l) return;
+  const t = tEnd - win + (view.hx - pad.l) / (w - pad.l - pad.r) * win;
+  let lo = i0, hi = i1 - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (B.t[m] < t) lo = m + 1; else hi = m; }
+  const i = lo, x = X(B.t[i]);
+  ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x + 0.5, pad.t); ctx.lineTo(x + 0.5, h - pad.b); ctx.stroke();
+  const d = devArr();
+  const rows = [['Truth', B.gt[i], C.gt], ['Preview', B.est[i], C.est], ['Board', d[i], C.dev], ['Error', B.est[i] - B.gt[i], C.muted]].filter(r => Number.isFinite(r[1]));
+  for (const r of rows.slice(0, 3)) { ctx.fillStyle = r[2]; ctx.beginPath(); ctx.arc(x, Y(r[1]), 3.2, 0, 7); ctx.fill(); }
+  ctx.font = '11px ' + css('--f-mono');
+  const bw = 132, bh = 16 * rows.length + 22, bx = x + 12 + bw > w ? x - 12 - bw : x + 12, by = pad.t + 4;
+  ctx.fillStyle = C.panel; ctx.strokeStyle = C.line; ctx.globalAlpha = 0.95; ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = C.muted; ctx.fillText(`${(B.t[i] - tEnd).toFixed(2)} s`, bx + 8, by + 5);
+  rows.forEach((r, k) => { ctx.fillStyle = r[2]; ctx.fillText(r[0], bx + 8, by + 21 + k * 16); ctx.fillStyle = C.ink; ctx.textAlign = 'right'; ctx.fillText((r[0] === 'Error' && r[1] > 0 ? '+' : '') + r[1].toFixed(3), bx + bw - 8, by + 21 + k * 16); ctx.textAlign = 'left'; });
+}
+function scoreIdx() { return windowIdx(+$('metWin').value); }
+function drawTc() {
+  const { ctx, w, h } = setup($('cvTc')), [i0, i1] = scoreIdx(), f = featureArr();
+  if (i1 - i0 < 10) return emptyMsg(ctx, w, h, 'Not enough data yet');
+  let xmin = Infinity, xmax = -Infinity;
+  for (let i = i0; i < i1; i++) { const x = f[i]; if (Number.isFinite(x)) { if (x < xmin) xmin = x; if (x > xmax) xmax = x; } }
+  if (!Number.isFinite(xmin)) return emptyMsg(ctx, w, h, 'No raw reading in the stream: send MODE D');
+  const span = xmax - xmin || 1; xmin -= span * 0.05; xmax += span * 0.05;
+  const F = frame(ctx, w, h, [xmin, xmax], [0, 12], { ylab: 'true m/s', xlab: 'raw ' + MODELS[S.model].feature });
+  const stride = Math.max(1, Math.floor((i1 - i0) / 2500));
+  ctx.fillStyle = C.gt; ctx.globalAlpha = 0.22;
+  for (let i = i0; i < i1; i += stride) { const x = f[i], g = B.gt[i]; if (Number.isFinite(x) && Number.isFinite(g)) ctx.fillRect(F.X(x) - 1, F.Y(g) - 1, 2, 2); }
+  ctx.globalAlpha = 1;
+  const p = S.params[S.model], rho = lastFinite(B.rho) || p.rho_ref;
+  const curve = (pp, color, dash) => { ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash(dash || []); ctx.beginPath(); let pen = false; for (let k = 0; k <= 200; k++) { const x = xmin + (xmax - xmin) * k / 200, v = staticMap(S.model, pp, x, rho); const y = F.Y(Math.min(12, v)); if (pen) ctx.lineTo(F.X(x), y); else { ctx.moveTo(F.X(x), y); pen = true; } } ctx.stroke(); ctx.setLineDash([]); };
+  if (S.mode === 'sim' && S.showTruth) { const tp = S.model === 'rotor' ? { rotor_slope: TRUE.rotor_slope, rotor_offset: TRUE.rotor_offset, rotor_min_hz: 0 } : trueSqrt(); curve({ ...p, ...tp }, C.good, [4, 4]); }
+  curve(S.board[S.model], C.dev, [2, 3]);
+  curve(p, C.est);
+}
+// true sqrt params in feature units, given the board's load-cell settings
+function trueSqrt() { const b = S.board.sqrt; return { sqrt_k: TRUE.sqrt_k * TRUE.lc_n_per_count / b.lc_n_per_count, sqrt_x0: (TRUE.lc_offset - b.lc_offset) * b.lc_n_per_count }; }
+function lastFinite(a) { for (let i = a.length - 1; i >= Math.max(0, a.length - 400); i--) if (Number.isFinite(a[i])) return a[i]; return NaN; }
+function binStats(est) {
+  const [i0, i1] = scoreIdx(), bins = [];
+  for (let b = 0; b < 12; b++) bins.push({ n: 0, s: 0, s2: 0 });
+  for (let i = i0; i < i1; i++) { const g = B.gt[i], e = est[i]; if (!Number.isFinite(g) || !Number.isFinite(e)) continue; const k = Math.floor(g); if (k < 0 || k > 11) continue; const d = e - g; bins[k].n++; bins[k].s += d; bins[k].s2 += d * d; }
+  return bins.map((b, k) => b.n > 20 ? { k, bias: b.s / b.n, sd: Math.sqrt(Math.max(0, b.s2 / b.n - (b.s / b.n) ** 2)), n: b.n } : null);
+}
+function drawBins(cv) {
+  const { ctx, w, h } = setup(cv), bins = binStats(B.est), bd = S.hidden.dev ? [] : binStats(devArr());
+  const vals = bins.filter(Boolean); if (!vals.length) return emptyMsg(ctx, w, h, 'Not enough data yet');
+  let m = 0.2; for (const b of vals.concat(bd.filter(Boolean))) m = Math.max(m, Math.abs(b.bias) + b.sd);
+  m = Math.min(4, m * 1.1);
+  const F = frame(ctx, w, h, [1, 12], [-m, m], { ylab: 'reads high ↑ / low ↓  m/s', xlab: 'true m/s', xn: 11, xfmt: v => v.toFixed(0) });
+  ctx.strokeStyle = C.faint; ctx.beginPath(); ctx.moveTo(F.pad.l, F.Y(0) + 0.5); ctx.lineTo(w - F.pad.r, F.Y(0) + 0.5); ctx.stroke();
+  const bw = (F.X(2) - F.X(1)) * 0.32;
+  const draw = (arr, color, off) => { for (const b of arr) { if (!b) continue; const cx = F.X(b.k + 0.5) + off * bw; const y0 = F.Y(0), y1 = F.Y(b.bias); ctx.fillStyle = color; ctx.globalAlpha = 0.85; ctx.fillRect(cx - bw / 2, Math.min(y0, y1), bw, Math.max(1, Math.abs(y1 - y0))); ctx.globalAlpha = 1; ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, F.Y(b.bias - b.sd)); ctx.lineTo(cx, F.Y(b.bias + b.sd)); ctx.moveTo(cx - 3, F.Y(b.bias - b.sd)); ctx.lineTo(cx + 3, F.Y(b.bias - b.sd)); ctx.moveTo(cx - 3, F.Y(b.bias + b.sd)); ctx.lineTo(cx + 3, F.Y(b.bias + b.sd)); ctx.stroke(); } };
+  const both = bd.some(Boolean);
+  draw(bins, C.est, both ? -0.55 : 0); if (both) draw(bd, C.dev, 0.55);
+}
+function drawHist(cv) {
+  const { ctx, w, h } = setup(cv), [i0, i1] = scoreIdx(), m = curMet;
+  if (!m) return emptyMsg(ctx, w, h, 'Not enough data yet');
+  const R = Math.max(0.3, Math.min(3, Math.abs(m.bias) + 4 * m.sigma)), nb = 41, cnt = new Array(nb).fill(0); let tot = 0;
+  for (let i = i0; i < i1; i++) { const d = B.est[i] - B.gt[i]; if (!Number.isFinite(d)) continue; const k = Math.floor((d + R) / (2 * R) * nb); if (k >= 0 && k < nb) { cnt[k]++; tot++; } }
+  const dens = cnt.map(c => c / tot / (2 * R / nb)), pk = Math.max(...dens, 1e-6);
+  const F = frame(ctx, w, h, [-R, R], [0, pk * 1.12], { ylab: 'share of samples', xlab: 'error m/s', yn: 3 });
+  const bw = (F.X(R) - F.X(-R)) / nb;
+  ctx.fillStyle = C.est; ctx.globalAlpha = 0.55;
+  dens.forEach((d, k) => { const x = F.X(-R + k * 2 * R / nb); ctx.fillRect(x + 0.5, F.Y(d), bw - 1, F.Y(0) - F.Y(d)); });
+  ctx.globalAlpha = 1; ctx.strokeStyle = C.ink; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (let k = 0; k <= 120; k++) { const x = -R + 2 * R * k / 120, y = Math.exp(-0.5 * ((x - m.bias) / m.sigma) ** 2) / (m.sigma * Math.sqrt(2 * Math.PI)); k ? ctx.lineTo(F.X(x), F.Y(Math.min(y, pk * 1.12))) : ctx.moveTo(F.X(x), F.Y(Math.min(y, pk * 1.12))); }
+  ctx.stroke();
+  ctx.strokeStyle = C.faint; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(F.X(0), F.pad.t); ctx.lineTo(F.X(0), h - F.pad.b); ctx.stroke(); ctx.setLineDash([]);
+}
+function drawSc() {
+  const { ctx, w, h } = setup($('cvSc')), [i0, i1] = scoreIdx();
+  if (i1 - i0 < 10) return emptyMsg(ctx, w, h, 'Not enough data yet');
+  const F = frame(ctx, w, h, [0, 12], [0, 12], { ylab: 'calibrated m/s', xlab: 'true m/s', xn: 6 });
+  ctx.strokeStyle = C.faint; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(F.X(0), F.Y(0)); ctx.lineTo(F.X(12), F.Y(12)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = C.good; ctx.globalAlpha = 0.25; for (const k of [-0.5, 0.5]) { ctx.beginPath(); ctx.moveTo(F.X(Math.max(0, -k)), F.Y(Math.max(0, k))); ctx.lineTo(F.X(12 - Math.max(0, k)), F.Y(12 + Math.min(0, k))); ctx.stroke(); } ctx.globalAlpha = 1;
+  const stride = Math.max(1, Math.floor((i1 - i0) / 3000)), d = devArr();
+  const pts = (arr, color) => { ctx.fillStyle = color; ctx.globalAlpha = 0.3; for (let i = i0; i < i1; i += stride) { const g = B.gt[i], e = arr[i]; if (Number.isFinite(g) && Number.isFinite(e)) ctx.fillRect(F.X(g) - 1, F.Y(Math.min(12, e)) - 1, 2, 2); } ctx.globalAlpha = 1; };
+  if (!S.hidden.dev) pts(d, C.dev); pts(B.est, C.est);
+}
+function drawRaw(cv) {
+  const { ctx, w, h } = setup(cv), n = B.t.length, sel = $('rawSel').value;
+  if (!n) return emptyMsg(ctx, w, h, 'Waiting for samples…');
+  const win = +$('tsWin').value, [i0] = windowIdx(win), tEnd = B.t[n - 1];
+  let arr, unit;
+  if (sel === 'feature') { arr = featureArr(); unit = 'raw ' + MODELS[S.model].feature; }
+  else if (sel === 'rate') { arr = new Array(n).fill(NaN); for (let i = Math.max(1, i0); i < n; i++) arr[i] = (B.t[i] - B.t[i - 1]) * 1000; unit = 'ms between samples'; }
+  else { arr = B[sel]; unit = { rho: 'kg/m³', temp_c: '°C', pressure_pa: 'Pa' }[sel]; }
+  let lo = Infinity, hi = -Infinity; for (let i = i0; i < n; i++) { const v = arr[i]; if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+  if (lo === Infinity) return emptyMsg(ctx, w, h, 'Channel not in the stream');
+  const pad = (hi - lo) * 0.1 || Math.abs(hi) * 0.001 || 1;
+  const F = frame(ctx, w, h, [tEnd - win, tEnd], [lo - pad, hi + pad], { ylab: unit, xfmt: v => (v - tEnd).toFixed(0) + 's', l: 50 });
+  ctx.save(); ctx.beginPath(); ctx.rect(F.pad.l, 0, w, h); ctx.clip(); line(ctx, F.X, F.Y, B.t, arr, i0, n, C.accent, 1.2, w); ctx.restore();
+}
+function drawHistory(cv) {
+  const { ctx, w, h } = setup(cv), H = S.history;
+  if (H.length < 2) return emptyMsg(ctx, w, h, 'Collecting score history…');
+  const t0 = H[0].t, t1 = H[H.length - 1].t; let mx = 0; for (const p of H) mx = Math.max(mx, p.mse);
+  const F = frame(ctx, w, h, [t0, t1], [0, mx * 1.15 || 1], { ylab: 'MSE m²/s²', yn: 3, xfmt: v => (v - t1).toFixed(0) + 's', l: 46 });
+  for (const m of S.marks) { if (m.t < t0) continue; const x = F.X(m.t); ctx.strokeStyle = C.accent; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.moveTo(x, F.pad.t); ctx.lineTo(x, h - F.pad.b); ctx.stroke(); ctx.globalAlpha = 1; }
+  if (S.baseline) { const y = F.Y(S.baseline.met.mse); ctx.strokeStyle = C.faint; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(F.pad.l, y); ctx.lineTo(w - F.pad.r, y); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = C.faint; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText('baseline', F.pad.l + 4, y - 2); }
+  ctx.beginPath(); H.forEach((p, k) => k ? ctx.lineTo(F.X(p.t), F.Y(p.mse)) : ctx.moveTo(F.X(p.t), F.Y(p.mse)));
+  ctx.strokeStyle = C.est; ctx.lineWidth = 1.8; ctx.stroke();
+  ctx.lineTo(F.X(t1), F.Y(0)); ctx.lineTo(F.X(t0), F.Y(0)); ctx.closePath(); ctx.fillStyle = C.est; ctx.globalAlpha = 0.1; ctx.fill(); ctx.globalAlpha = 1;
+  const last = H[H.length - 1]; ctx.fillStyle = C.est; ctx.beginPath(); ctx.arc(F.X(last.t), F.Y(last.mse), 3.5, 0, 7); ctx.fill();
+}
+function drawConv(hist) {
+  const { ctx, w, h } = setup($('cvConv')); const lo = Math.min(...hist), hi = Math.max(...hist);
+  ctx.strokeStyle = C.accent; ctx.lineWidth = 1.4; ctx.beginPath();
+  hist.forEach((v, k) => { const x = 4 + k / (hist.length - 1) * (w - 8), y = 4 + (1 - (Math.log(v + 1e-9) - Math.log(lo + 1e-9)) / ((Math.log(hi + 1e-9) - Math.log(lo + 1e-9)) || 1)) * (h - 16); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke(); ctx.fillStyle = C.faint; ctx.font = '10px ' + css('--f-mono'); ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(`error during the search, ${hist.length} steps (log)`, w - 4, h);
+}
+const C2 = { bins: ['Error by speed', 'Bars: average error per 1 m/s band. Whiskers: ±1σ spread.'], hist: ['Error spread', 'How errors are distributed. Narrow and centred on 0 is best.'] };
+const C4 = { hist: ['Score over time', 'MSE every 2 s. Dashed lines: settings changed.'], tele: ['Telemetry', 'Raw channels from the board.'] };
+function renderCardText() {
+  $('c2Title').textContent = C2[S.c2][0]; $('c2Sub').textContent = C2[S.c2][1]; $('c2Sub').title = C2[S.c2][1];
+  $('c4Title').textContent = C4[S.c4][0]; $('c4Sub').textContent = C4[S.c4][1]; $('rawSel').hidden = S.c4 !== 'tele';
+}
+
+/* ---------- Tiles & readout ---------- */
+const TILES = [
+  { k: 'mse', label: 'Score (MSE)', unit: 'm²/s²', d: 4, key: true, grade: v => v < 0.05 ? 'good' : v < 0.2 ? 'warn' : 'bad', note: 'what the marking ranks', tip: 'Mean squared error against ground truth. Lower is better; the coursework ranks teams on this.' },
+  { k: 'rmse', label: 'Typical error', unit: 'm/s', d: 3, note: 'root of MSE', tip: 'Root-mean-square error: the size of a typical error in m/s.' },
+  { k: 'bias', label: 'Bias', unit: 'm/s', d: 3, signed: true, grade: v => Math.abs(v) < 0.05 ? 'good' : Math.abs(v) < 0.2 ? 'warn' : 'bad', note: '+ reads high, − low', tip: 'Average error. Fix it with the calibration curve (offset or gain).' },
+  { k: 'sigma', label: 'Noise (σ)', unit: 'm/s', d: 3, note: 'spread around bias', tip: 'Standard deviation of the error. Reduce it with smoothing, at the cost of lag.' },
+  { k: 'lag_ms', label: 'Lag', unit: 'ms', d: 0, grade: v => v < 40 ? 'good' : v < 120 ? 'warn' : 'bad', note: 'behind ground truth', tip: 'How far the reading trails the truth on speed changes. Reduce it with lag compensation or less smoothing.' },
+  { k: 'r2', label: 'Tracking (R²)', unit: '', d: 4, note: '1 = perfect', tip: 'Share of the speed variation the sensor explains. 1.0 is perfect.' },
+  { k: 'mae', label: 'Mean |error|', unit: 'm/s', d: 3, note: 'average miss', tip: 'Mean absolute error.' },
+  { k: 'max_abs', label: 'Worst error', unit: 'm/s', d: 2, note: 'largest miss', tip: 'Largest single error in the window, usually on a step.' },
+];
+function buildTiles() {
+  $('tiles').innerHTML = TILES.map(t => `<div class="tile${t.key ? ' key' : ''}" title="${t.tip}"><label><span>${t.label}</span><span class="state" id="st_${t.k}"></span></label><div class="val" id="tv_${t.k}">–</div><div class="tsub" id="ts_${t.k}">${t.note}</div></div>`).join('');
+}
+function renderTiles() {
+  const m = S.score === 'dev' ? devMet : curMet, base = S.baseline && S.baseline.met;
+  for (const t of TILES) {
+    const v = m ? m[t.k] : NaN;
+    $('tv_' + t.k).innerHTML = Number.isFinite(v) ? `${t.signed && v > 0 ? '+' : ''}${v.toFixed(t.d)}<small>${t.unit}</small>` : '–';
+    const st = $('st_' + t.k);
+    st.className = 'state' + (t.grade && Number.isFinite(v) ? ' ' + t.grade(v) : '');
+    const sub = $('ts_' + t.k);
+    if (base && Number.isFinite(base[t.k]) && Number.isFinite(v)) {
+      const better = t.k === 'r2' ? v > base[t.k] : Math.abs(v) < Math.abs(base[t.k]);
+      sub.innerHTML = `<span class="${better ? 'delta-good' : 'delta-bad'}">${t.k === 'r2' ? (v - base[t.k] >= 0 ? '+' : '') + (v - base[t.k]).toFixed(4) : pct(Math.abs(v), Math.abs(base[t.k]))}</span> vs baseline`;
+    } else sub.textContent = t.note;
+  }
+}
+function renderReadout() {
+  if (!B.t.length) return;
+  const g = lastFinite(B.gt), e = S.score === 'dev' ? lastFinite(devArr()) : lastFinite(B.est), dv = lastFinite(devArr());
+  $('roGt').innerHTML = (Number.isFinite(g) ? g.toFixed(2) : '–') + '<small>m/s</small>';
+  $('roEst').innerHTML = (Number.isFinite(e) ? e.toFixed(2) : '–') + '<small>m/s</small>';
+  $('roEstLbl').textContent = S.score === 'dev' ? 'Board output' : 'PC preview';
+  const err = e - g; $('roErr').innerHTML = Number.isFinite(err) ? `<span class="${Math.abs(err) < 0.2 ? 'delta-good' : 'delta-bad'}">${err >= 0 ? '+' : ''}${err.toFixed(3)} m/s</span>` : '–';
+  const pos = v => `calc(${Math.max(0, Math.min(12, v)) / 12 * 100}% - 1.5px)`;
+  if (Number.isFinite(g)) $('gkGt').style.left = pos(g);
+  if (Number.isFinite(e)) $('gkEst').style.left = pos(e);
+  $('gkDev').hidden = !Number.isFinite(dv) || S.score === 'dev'; if (Number.isFinite(dv)) $('gkDev').style.left = pos(dv);
+}
+function renderTele() {
+  const sh = S.serverTele || {}, sens = sh.sensor_hz ?? tele.sensHz, gth = sh.gt_hz ?? tele.gtHz;
+  $('tSens').innerHTML = `<span class="${sens > 194 ? 'delta-good' : 'delta-bad'}">${sens.toFixed(0)} Hz</span>`;
+  $('tGt').innerHTML = gth > 0 ? `${gth.toFixed(0)} Hz` : '<span class="delta-bad">none</span>';
+  $('tDrops').textContent = sh.drops ?? tele.drops;
+  const r = lastFinite(B.rho), tc = lastFinite(B.temp_c), p = lastFinite(B.pressure_pa), fx = lastFinite(featureArr());
+  $('tRawLbl').textContent = MODELS[S.model].featLabel; $('tRaw').textContent = Number.isFinite(fx) ? (S.model === 'sqrt' ? fx.toFixed(3) + ' N' : fx.toFixed(1) + ' rev/s') : '–';
+  $('tRho').textContent = Number.isFinite(r) ? r.toFixed(4) : '–'; $('tTemp').textContent = Number.isFinite(tc) ? tc.toFixed(2) + ' °C' : '–'; $('tBaro').textContent = Number.isFinite(p) ? (p / 100).toFixed(1) + ' hPa' : '–';
+}
+
+/* ---------- Params UI ---------- */
+function buildModelSeg() {
+  for (const id of ['modelSeg', 'modelSeg2']) {
+    $(id).innerHTML = Object.entries(MODELS).map(([k, m]) => `<button aria-pressed="${k === S.model}" data-m="${k}">${m.label}</button>`).join('');
+    $(id).querySelectorAll('button').forEach(b => b.onclick = () => setModel(b.dataset.m));
+  }
+}
+function setModel(m) {
+  if (!MODELS[m] || m === S.model) return;
+  S.model = m; buildModelSeg(); buildParams(); buildFree(); renderSteps(true);
+  if (S.mode === 'sim') { B.feature = B[MODELS[m].simKey].slice(); B.dev = B['dev_' + m].slice(); }
+  S.lastFit = null; renderFitResult(); markParamsChanged('model'); send({ type: 'set_model', model: m }); recMark('model');
+}
+function viewOf(s) { return s.view ? s.view : { unit: s.unit, min: s.min, max: s.max, step: s.step, to: x => x }; }
+function buildParams() {
+  const M = MODELS[S.model];
+  $('modelHint').textContent = M.hint; $('formula').textContent = M.formula;
+  const specs = specsFor(S.model), p = S.params[S.model], bp = S.board[S.model];
+  const order = ['curve', 'response', 'board', 'env'], groups = {};
+  specs.filter(s => !s.hidden).forEach(s => (groups[s.group] = groups[s.group] || []).push(s));
+  $('params').innerHTML = order.filter(g => groups[g]).map(g => `<div class="pgroup"><div class="gh">${GROUPS[g].label}${GROUPS[g].tag ? `<span class="tag">${GROUPS[g].tag}</span>` : ''}</div>${groups[g].map(s => {
+    const V = viewOf(s), v = p[s.name], u = (V.to(v) - V.min) / (V.max - V.min) * 1000;
+    if (s.kind === 'choice') return `<div class="param${v !== bp[s.name] ? ' dirty' : ''}" id="pr_${s.name}">
+      <div class="pl"><label>${s.label}</label><code>${s.name}</code></div>
+      <div class="seg mini" style="grid-column:2/4" data-choice="${s.name}">${s.options.map(([ov, ol]) => `<button aria-pressed="${(v >= 0.5 ? 1 : 0) === ov}" data-v="${ov}">${ol}</button>`).join('')}</div>
+      <div class="what">${s.what}</div></div>`;
+    return `<div class="param${v !== bp[s.name] ? ' dirty' : ''}" id="pr_${s.name}">
+      <div class="pl"><label for="pn_${s.name}">${s.label}</label><code>${s.name}</code>${s.board && s.group !== 'board' ? '<span class="tag">on board</span>' : ''}</div>
+      <input type="number" id="pn_${s.name}" value="${fmtP(roundTo(V.to(v), V.step))}" step="any" title="${V.unit}">
+      <button class="rs" title="Back to the board's value" data-r="${s.name}" aria-label="Reset ${s.label}">↺</button>
+      <div class="what">${s.what}${V.unit ? ` <span class="unit">[${V.unit}]</span>` : ''}</div>
+      <input type="range" id="ps_${s.name}" min="0" max="1000" step="1" value="${u}" aria-label="${s.label}">
+      ${s.lo || s.hi ? `<div class="ends"><span>← ${s.lo}</span><span>${s.hi} →</span></div>` : ''}</div>`; }).join('')}</div>`).join('');
+  $('params').querySelectorAll('[data-choice]').forEach(g => g.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const sp = specs.find(x => x.name === g.dataset.choice); setParam(sp, +b.dataset.v, true); buildParams(); buildFree();
+  }));
+  for (const s of specs) {
+    if (s.kind === 'choice' || !$('pn_' + s.name)) continue;
+    const numIn = $('pn_' + s.name), rng = $('ps_' + s.name), V = viewOf(s);
+    const fromUi = x => s.view ? s.view.from(x) : x;
+    rng.oninput = () => { const x = roundTo(V.min + rng.value / 1000 * (V.max - V.min), V.step); numIn.value = fmtP(x); setParam(s, fromUi(x), false); };
+    rng.onchange = () => setParam(s, fromUi(+numIn.value), true);
+    numIn.onchange = () => { const x = +numIn.value; if (!Number.isFinite(x) || (s.view && x <= 0)) return; rng.value = (x - V.min) / (V.max - V.min) * 1000; setParam(s, fromUi(x), true); };
+  }
+  renderPlate(); renderAlphaHint();
+  $('params').querySelectorAll('[data-r]').forEach(b => b.onclick = () => { const s = specs.find(x => x.name === b.dataset.r); setParam(s, S.board[S.model][s.name], true); buildParams(); });
+  renderSteps();
+}
+function renderAlphaHint() {
+  const el = $('pr_ema_alpha'); if (!el) return;
+  const a = emaAlpha(S.params[S.model].ema_alpha), tau = DT * (1 - a) / a * 1000;
+  let h = el.querySelector('.ah'); if (!h) { h = document.createElement('div'); h.className = 'what ah'; el.appendChild(h); }
+  h.textContent = a >= 1 ? 'α = 1: no smoothing' : `≈ ${tau < 10 ? tau.toFixed(1) : tau.toFixed(0)} ms memory (time constant at 200 Hz)`;
+}
+let paramLogT = 0;
+function renderPlate() {
+  const on = S.model === 'sqrt'; $('plateRow').hidden = !on; if (!on) return;
+  const A = +$('plateArea').value, cda = 2e4 / S.params.sqrt.sqrt_k, cd = cda / A;
+  const ok = cd > 0.9 && cd < 1.5;
+  $('plateCd').innerHTML = A > 0 ? `→ implied Cd <b class="${ok ? 'delta-good' : 'delta-bad'}">${cd.toFixed(2)}</b>${ok ? '' : ' (flat plate ≈ 1.1–1.3)'}` : '';
+}
+function setParam(s, v, commit) {
+  S.params[S.model][s.name] = v;
+  $('pr_' + s.name)?.classList.toggle('dirty', v !== S.board[S.model][s.name]);
+  if (s.name === 'sqrt_k') renderPlate();
+  if (s.name === 'ema_alpha') renderAlphaHint();
+  if (!s.board) { estDirty = true; if (S.paused) recomputeEst(); }
+  if (commit) {
+    markParamsChanged(s.name); send({ type: 'set_param', name: s.name, value: v }); maybeAutoPush([s.name]); recMark('param', s.label);
+    if (performance.now() - paramLogT > 800) { log(`${s.label} = ${dispVal(s.name, v, true)}`); paramLogT = performance.now(); }
+  } else scheduleMetrics();
+}
+function buildFree() {
+  const specs = specsFor(S.model), def = new Set(MODELS[S.model].staticFree);
+  $('freeChips').innerHTML = specs.filter(s => !s.board && !s.hidden && s.name !== 'rotor_min_hz').map(s => `<label class="chip" title="${s.name}"><input type="checkbox" data-p="${s.name}"${def.has(s.name) ? ' checked' : ''}>${s.label}</label>`).join('');
+}
+document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
+  const pr = b.dataset.preset, st = new Set(MODELS[S.model].staticFree);
+  document.querySelectorAll('#freeChips input').forEach(i => { const k = i.dataset.p; i.checked = pr === 'all' ? true : pr === 'static' ? st.has(k) : dynFree().includes(k); });
+});
+
+/* ---------- Board push / commands ---------- */
+function firmwareParams(model) {
+  const p = S.params[model], names = specsFor(model).filter(s => !['rho_ref', 'lpf_hz'].includes(s.name)).map(s => s.name);
+  return Object.fromEntries(names.map(n => [n, p[n]]));
+}
+function pushParams(names) {
+  const model = S.model, fp = firmwareParams(model), list = (names || Object.keys(fp)).filter(n => n !== 'lc_offset');
+  if (S.mode === 'sim') {
+    for (const n of list) if (n in fp) S.board[model][n] = fp[n];
+    Object.assign(simChain[model], freshChain());
+    if (!names) log(`Pushed ${list.length} settings to the simulated board`, 'ok');
+  } else {
+    if (names) for (const n of list) send({ type: 'command', line: `SET ${n} ${fp[n]}` });
+    else { send({ type: 'push_params' }); log('Pushing settings to the board…'); }
+    for (const n of list) S.board[model][n] = fp[n];
+  }
+  buildParams(); recMark('push', names ? 'auto-push' : 'push');
+}
+function maybeAutoPush(names) { if (S.autoPush) pushParams(names.filter(n => n in firmwareParams(S.model))); }
+$('btnPush').onclick = () => pushParams();
+$('autoPush').onchange = e => { S.autoPush = e.target.checked; send({ type: 'auto_push', on: S.autoPush }); };
+document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => runCmd(b.dataset.cmd));
+function runCmd(c) {
+  if (c === 'TARE') { const g = lastFinite(B.gt); ST.tared = !(Math.abs(g) > 0.5); }
+  if (S.mode !== 'live') {
+    if (c === 'TARE') { S.board.sqrt.lc_offset = Math.round(TRUE.lc_offset + sim.F / TRUE.lc_n_per_count); S.params.sqrt.lc_offset = S.board.sqrt.lc_offset; buildParams(); recMark('tare'); log(`#ok lc_offset=${S.board.sqrt.lc_offset} (tared at ${sim.fan.toFixed(1)} m/s${sim.fan > 0.5 ? ': tare with the fan off!' : ''})`, sim.fan > 0.5 ? 'w' : 'ok'); }
+    else if (c === 'GET') log('#cal ' + JSON.stringify({ method: S.model === 'rotor' ? 'METHOD_CUP_ENCODER' : 'METHOD_DRAG_PLATE', ...firmwareParams(S.model) }));
+    else log(`(sim) ${c} has no effect`);
+    return;
+  }
+  send({ type: 'command', line: c }); log('> ' + c); recMark(c === 'TARE' ? 'tare' : 'command', c);
+}
+
+/* ---------- Baseline / export ---------- */
+$('btnBaseline').onclick = () => { const m = S.score === 'dev' ? devMet : curMet; if (!m) return log('No score yet', 'w'); S.baseline = { met: { ...m }, params: { ...S.params[S.model] }, model: S.model }; $('btnRevert').disabled = false; log(`Baseline pinned: MSE ${fmt(m.mse, 4)}`); renderTiles(); };
+$('btnRevert').onclick = () => { const b = S.baseline; if (!b) return; if (b.model !== S.model) setModel(b.model); Object.assign(S.params[S.model], b.params); sendParams(b.params); buildParams(); markParamsChanged('revert'); recMark('revert'); log('Restored baseline settings'); };
+$('btnResetAll').onclick = () => { Object.assign(S.params[S.model], S.board[S.model]); sendParams(S.board[S.model]); buildParams(); markParamsChanged('reset'); recMark('reset'); log('Settings reset to the board values'); };
+let expTab = 'json';
+function cFloat(v) { const t = String(+(+v).toPrecision(7)); return t + (/[.e]/.test(t) ? 'f' : '.0f'); }
+function exportTexts() {
+  const model = S.model, fp = firmwareParams(model), m = curMet, ts = new Date().toISOString();
+  const method = S.serverMethod || (model === 'rotor' ? 'METHOD_CUP_ENCODER' : 'METHOD_DRAG_PLATE');
+  const phys = model === 'sqrt' ? { cda_cm2: 2e4 / fp.sqrt_k, plate_area_cm2: +$('plateArea').value || null, cd: (2e4 / fp.sqrt_k) / (+$('plateArea').value || NaN) } : { air_per_rev_m: fp.rotor_slope, startup_speed_mps: fp.rotor_offset };
+  const json = JSON.stringify({ model, sensor: MODELS[model].label, method, params: fp, physical: phys, rho_ref: S.params[model].rho_ref, fit: S.lastFit ? { method: S.lastFit.method, engine: S.lastFit.engine, window_s: +$('fitWin').value, free: S.lastFit.free } : null,
+    metrics_before: S.baseline ? S.baseline.met : null, metrics_after: m, source: S.mode, created: ts }, (k, v) => typeof v === 'number' ? +v.toPrecision(7) : v, 2);
+  const h = `// Generated by calibration bench, ${ts}\n// Source: ${S.mode}${m ? `, window MSE ${m.mse.toFixed(4)} m^2/s^2, bias ${m.bias.toFixed(3)} m/s` : ''}\n#pragma once\n\n` +
+    (S.serverMethod ? `#define AIRSPEED_METHOD ${S.serverMethod}\n` : `// #define AIRSPEED_METHOD ${method}  // confirm against the build\n`) +
+    Object.entries(fp).map(([k, v]) => `#define CAL_${k.toUpperCase()} ${cFloat(v)}`).join('\n') + '\n';
+  const cmd = Object.entries(fp).filter(([k]) => k !== 'lc_offset').map(([k, v]) => `SET ${k} ${+v.toPrecision(7)}`).join('\n') + '\nGET\n';
+  return { json, h, cmd };
+}
+const EXP_NAMES = { json: 'calibration.json', h: 'calibration_generated.h', cmd: 'calibration_set.txt' };
+function showExport() { $('modal').hidden = false; $('btnWrite').hidden = $('installWrap').hidden = S.mode !== 'live'; renderExport(); }
+function renderExport() { $('expText').textContent = exportTexts()[expTab]; document.querySelectorAll('#expTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.t === expTab)); $('copyMsg').textContent = ''; }
+$('btnExport').onclick = showExport; $('modalClose').onclick = () => $('modal').hidden = true;
+$('modal').onclick = e => { if (e.target.id === 'modal') $('modal').hidden = true; };
+document.querySelectorAll('#expTabs button').forEach(b => b.onclick = () => { expTab = b.dataset.t; renderExport(); });
+$('btnCopy').onclick = () => { const t = $('expText').textContent; const p = navigator.clipboard?.writeText(t); if (p) p.then(() => $('copyMsg').textContent = 'Copied', selectPre); else selectPre(); };
+function selectPre() { const r = document.createRange(); r.selectNodeContents($('expText')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); $('copyMsg').textContent = 'Selected: press Ctrl/⌘ C'; }
+$('btnSaveExp').onclick = async () => { $('copyMsg').textContent = await saveFile(EXP_NAMES[expTab], $('expText').textContent); ST.exported = true; renderSteps(); };
+$('btnWrite').onclick = () => { send({ type: 'export', install: $('chkInstall').checked, params: firmwareParams(S.model), model: S.model }); ST.exported = true; renderSteps(); log('Asked the PC to write calibration files'); };
+
+/* ---------- Misc controls ---------- */
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('.side .panel').forEach(p => p.hidden = p.id !== 'tab-' + b.dataset.tab);
+  if (b.dataset.tab === 'rec') renderRec();
+  if (b.dataset.tab === 'steps') renderSteps(true);
+});
+$('btnPause').onclick = () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? 'Resume' : 'Pause'; $('btnPause').classList.toggle('on', S.paused); if (!S.paused) simLast = performance.now(); };
+$('btnFit').onclick = () => {
+  const have = B.t.length ? nowT() - B.t[0] : 0, want = +$('fitWin').value;
+  setFitStatus(have < want * 0.8 ? `Only ${have.toFixed(0)} s of data so far; ${want} s gives a more trustworthy fit…` : 'Fitting…', have < want * 0.8 ? 'w' : '');
+  if (S.mode === 'live' && S.ws) {
+    const free = [...document.querySelectorAll('#freeChips input:checked')].map(i => i.dataset.p);
+    const dynOnly = free.length && free.every(k => dynFree().includes(k));
+    send({ type: 'fit', method: dynOnly ? 'dynamics' : $('fitMethod').value, window_s: want, free });
+  }
+  else setTimeout(browserFit, 20);
+};
+$('btnTruth').onclick = () => { S.showTruth = !S.showTruth; $('truthBox').hidden = !S.showTruth; $('btnTruth').textContent = S.showTruth ? 'Hide true values' : 'Reveal true values'; renderTruth(); };
+function renderTruth() { const t = trueSqrt(); $('truthBox').innerHTML = `Rotor: air per rev ${TRUE.rotor_slope}, start-up ${TRUE.rotor_offset} m/s (slightly curved, inertia ${TRUE.dist_const} m).<br>Drag: gain ≈ ${t.sqrt_k.toFixed(1)}, zero ≈ ${t.sqrt_x0.toFixed(4)} N with the board's load-cell settings (Cd varies ±${(TRUE.cd_re * 100).toFixed(0)} %).<br>Load cell: zero ${TRUE.lc_offset}, ${TRUE.lc_n_per_count.toExponential(3)} N/count. The green dashed line on the curve chart is the truth.`; }
+$('btnSimReset').onclick = () => { if (REC.on) recStop(); sim.reset(Math.floor(Math.random() * 1e6)); for (const k of BKEYS) B[k].length = 0; Object.assign(simChain.rotor, freshChain()); Object.assign(simChain.sqrt, freshChain()); S.history = []; S.marks = []; estDirty = true; log('Simulator restarted'); };
+$('simProfile').onchange = () => { log('Fan profile: ' + $('simProfile').selectedOptions[0].text); if (REC.on) { REC.events.push({ t: nowT(), kind: 'note', detail: 'fan profile ' + $('simProfile').value }); } };
+document.querySelectorAll('#legTs span').forEach(s => s.onclick = () => { S.hidden[s.dataset.s] = !S.hidden[s.dataset.s]; s.classList.toggle('off', S.hidden[s.dataset.s]); });
+function segWire(id, key, after) { document.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => { S[key] = b.dataset.v; document.querySelectorAll(`#${id} button`).forEach(x => x.setAttribute('aria-pressed', x === b)); after && after(); }); }
+segWire('scoreSeg', 'score', () => { S.history = []; computeMetrics(); if (REC.cols) renderRec(); });
+segWire('c2Seg', 'c2', renderCardText); segWire('c4Seg', 'c4', renderCardText);
+$('metWin').onchange = computeMetrics;
+const cvTs = $('cvTs');
+cvTs.addEventListener('pointermove', e => { const r = cvTs.getBoundingClientRect(); view.hx = e.clientX - r.left; });
+cvTs.addEventListener('pointerleave', () => { view.hx = null; });
+
+/* ---------- Guided calibration steps ----------
+   One checklist per method. Each step reads the live data to decide whether it is done, and its buttons
+   drive the same functions as the rest of the page (TARE, fits, push, export, recording). */
+const ST = { tared: false, weights: null, wRows: [], zeroed: false, curveFit: false, respFit: false, exported: false, stallSet: false, windowTried: false, pendingFit: null, open: null, busy: false };
+function isSimLike() { return S.mode === 'sim' || S.srvMode === 'sim'; }
+function fanSet(on) {
+  if (S.mode === 'sim') { sim.fanOff = !on; if (on && $('simProfile').value === 'mixed') { $('simProfile').value = 'steps'; } }
+  else if (S.srvMode === 'sim') send({ type: 'sim', fan: on ? 'on' : 'off', ...(on ? { profile: 'steps' } : {}) });
+  else { log(on ? 'Turn the tunnel fan on and step it through 2 → 10 m/s' : 'Turn the tunnel fan off', 'w'); return; }
+  log(on ? 'Fan on: stepping 2 → 10 m/s' : 'Fan off', 'ok');
+}
+function hangMass(g) { if (S.mode === 'sim') { sim.loadG = g; return true; } if (S.srvMode === 'sim') { send({ type: 'sim', load_g: g }); return true; } return false; }
+function measure(sec) {
+  const t0 = nowT(), started = Date.now();
+  return new Promise((res, rej) => {
+    const iv = setInterval(() => {
+      if (nowT() >= t0 + sec) {
+        clearInterval(iv);
+        const f = featureArr(); let n = 0, sx = 0, sx2 = 0, g = 0, gn = 0;
+        for (let i = B.t.length - 1; i >= 0 && B.t[i] > t0; i--) { const x = f[i]; if (Number.isFinite(x)) { n++; sx += x; sx2 += x * x; } if (Number.isFinite(B.gt[i])) { g += B.gt[i]; gn++; } }
+        if (!n) return rej(new Error('no raw readings: is the board in MODE D?'));
+        res({ mean: sx / n, std: Math.sqrt(Math.max(0, sx2 / n - (sx / n) ** 2)), n, gt: gn ? g / gn : NaN });
+      } else if (Date.now() - started > (sec + 8) * 1000) { clearInterval(iv); rej(new Error('no data arriving')); }
+    }, 100);
+  });
+}
+function coverage() { const c = new Array(9).fill(0); for (let i = 0; i < B.t.length; i++) { const k = Math.floor(B.gt[i]) - 2; if (k >= 0 && k < 9) c[k]++; } return c.map(n => n / FS); }
+function coverageHtml() { return `<div class="cov">${coverage().map((s, k) => `<span class="${s >= 3 ? 'on' : s > 0.5 ? 'part' : ''}" title="${(k + 2)}–${k + 3} m/s: ${s.toFixed(1)} s">${k + 2}</span>`).join('')}</div>`; }
+function covered() { return coverage().filter(s => s >= 3).length; }
+function solveWeights(rows, oldN) {
+  const pts = rows.filter(r => r.mass > 0 && Number.isFinite(r.F)); if (!pts.length) return null;
+  const W = pts.map(r => r.mass / 1000 * 9.80665), F = pts.map(r => r.F);
+  const sc = W.reduce((a, w, i) => a + w * F[i], 0) / W.reduce((a, w) => a + w * w, 0);
+  const res = F.map((f, i) => f - sc * W[i]), mx = Math.max(...F.map(Math.abs));
+  let icpt = NaN; const all = rows.filter(r => Number.isFinite(r.F));
+  if (all.length >= 2) { const x = all.map(r => r.mass / 1000 * 9.80665), y = all.map(r => r.F), mxx = x.reduce((a, b) => a + b) / x.length, my = y.reduce((a, b) => a + b) / y.length; const sl = x.reduce((a, xi, i) => a + (xi - mxx) * (y[i] - my), 0) / (x.reduce((a, xi) => a + (xi - mxx) ** 2, 0) || 1); icpt = my - sl * mxx; }
+  return { scale: sc, oldN, newN: oldN / sc, linPct: 100 * Math.max(...res.map(Math.abs)) / (mx || 1), icpt };
+}
+function pushedOk() {
+  const dirty = Object.keys(firmwareParams(S.model)).filter(k => k !== 'lc_offset' && S.params[S.model][k] !== S.board[S.model][k]);
+  return { dirty, ok: !dirty.length && curMet && devMet && Math.abs(devMet.mse - curMet.mse) <= 0.15 * curMet.mse + 0.002 };
+}
+const gtNow = () => lastFinite(B.gt);
+const STEP_DEFS = {
+  connect: { t: 'Connect sensor and pitot', why: 'Both streams at 200 Hz, with raw readings (MODE D) so the PC can preview.',
+    st: () => { const sh = S.serverTele || {}, sens = sh.sensor_hz ?? tele.sensHz, gth = sh.gt_hz ?? tele.gtHz, fx = Number.isFinite(lastFinite(featureArr()));
+      return sens > 190 && gth > 0 && fx ? ['done', `${sens.toFixed(0)} Hz · GT ${gth.toFixed(0)} Hz`] : ['todo', !fx ? 'no raw readings' : gth > 0 ? `${sens.toFixed(0)} Hz` : 'no ground truth']; },
+    body: () => `<div class="row"><button class="btn sm" data-a="setup">Open Setup</button><button class="btn sm" data-a="moded">Send MODE D</button></div>` },
+  tare: { t: 'Fan off, zero the load cell', why: 'TARE with no wind, so 0 N means no airflow. Taring with the fan on bakes an offset into every reading.',
+    st: () => ST.tared ? ['done', 'tared'] : Math.abs(gtNow()) > 0.5 ? ['warn', `wind ${gtNow().toFixed(1)} m/s`] : ['todo', 'still air'],
+    body: () => `<div class="row"><button class="btn sm" data-a="fanoff">Fan off</button><button class="btn sm primary" data-a="tare">TARE now</button></div><p class="hint">Wait until the ground truth reads about 0 m/s.</p>` },
+  weights: { t: 'Load-cell scale with known masses', why: 'Hang known masses on the plate so the newtons the board reports are true newtons. Then Cd·A from the fit is physically meaningful.',
+    st: () => ST.weights ? ['done', `scale ${((1 / ST.weights.scale - 1) * 100).toFixed(1)} %`] : ST.wRows.length ? ['todo', `${ST.wRows.length} points`] : ['todo', ''],
+    body: () => {
+      const exp = r => r.mass / 1000 * 9.80665, res = ST.wRes;
+      return `<div class="tbl"><table class="wtbl"><thead><tr><th>Mass g</th><th>Read N</th><th>Expected N</th><th>Error</th></tr></thead><tbody>${ST.wRows.map(r => `<tr><td>${r.mass}</td><td>${r.F.toFixed(4)}</td><td>${exp(r).toFixed(4)}</td><td>${r.mass > 0 ? pct(r.F, exp(r)) : '–'}</td></tr>`).join('') || '<tr><td colspan="4" class="wrap">Start with 0 g (nothing hanging), then 2–4 masses across the range.</td></tr>'}</tbody></table></div>
+      <div class="row"><input type="number" class="note-in" id="wMass" style="flex:0 0 80px" value="${ST.wRows.length ? [100, 200, 500, 50][ST.wRows.length % 4] : 0}" aria-label="Mass in grams"><span class="hint">g</span><button class="btn sm" data-a="wmeasure">${isSimLike() ? 'Hang &amp; measure 3 s' : 'Measure 3 s'}</button><button class="btn sm" data-a="wclear">Clear</button></div>
+      <div class="row"><button class="btn sm" data-a="wsolve">Solve scale</button>${res ? `<button class="btn sm primary" data-a="wapply">Apply &amp; push</button>` : ''}</div>
+      ${res ? `<p class="hint">Board reads ${((res.scale - 1) * 100).toFixed(2)} % ${res.scale > 1 ? 'high' : 'low'}. New scale ${res.newN.toExponential(4)} N/count (was ${res.oldN.toExponential(4)}). Linearity ${res.linPct.toFixed(2)} % of full scale${Number.isFinite(res.icpt) ? `, zero offset ${res.icpt.toFixed(4)} N${Math.abs(res.icpt) > 0.005 ? ': re-TARE with nothing hanging' : ''}` : ''}.</p>` : ''}`;
+    } },
+  zero: { t: 'Measure the zero-flow force F₀', why: 'With the fan still off, whatever force remains is subtracted before the square root, so low speeds read correctly.',
+    st: () => ST.zeroed ? ['done', `F₀ ${S.params.sqrt.sqrt_x0.toFixed(4)} N`] : Math.abs(gtNow()) > 0.5 ? ['warn', 'fan is on'] : ['todo', ''],
+    body: () => `<div class="row"><button class="btn sm" data-a="fanoff">Fan off</button><button class="btn sm primary" data-a="zero">Measure F₀ (3 s)</button></div>` },
+  sweep: { t: 'Sweep the fan 2 → 10 m/s', why: 'Hold each speed for a few seconds so every 1 m/s band has data. The fit needs the whole range.',
+    st: () => { const c = covered(); return c >= 8 ? ['done', `${c}/9 bands`] : ['todo', `${c}/9 bands`]; },
+    body: () => `${coverageHtml()}<div class="row"><button class="btn sm" data-a="fanon">Fan on (steps)</button></div><p class="hint">Green bands have at least 3 s of data. The buffer keeps the last ${MAX_S} s.</p>` },
+  curve: { t: () => S.model === 'sqrt' ? 'Fit drag area Cd·A and F₀' : 'Fit air per rev and start-up speed', why: () => S.model === 'sqrt' ? 'Finds the Cd·A that makes √(2F/(ρ·Cd·A)) match the pitot across the sweep.' : 'Finds the straight line from spin rate to wind speed that matches the pitot.',
+    st: () => ST.curveFit ? ['done', S.model === 'sqrt' ? `Cd·A ${(2e4 / S.params.sqrt.sqrt_k).toFixed(1)} cm²` : `${S.params.rotor.rotor_slope.toFixed(4)} m/rev`] : covered() < 6 ? ['warn', 'sweep first'] : ['todo', ''],
+    body: () => `<div class="row"><button class="btn sm primary" data-a="fitcurve">Fit curve (60 s)</button></div>${S.model === 'sqrt' ? '<p class="hint">Check the implied Cd under the formula in Tune: a flat plate should land near 1.1–1.3.</p>' : ''}` },
+  stall: { t: 'Set the stall cut-off', why: 'Below some wind the cups stop or creep. Readings under the cut-off report 0 m/s instead of a wrong small speed.',
+    st: () => ST.stallSet ? ['done', `${S.params.rotor.rotor_min_hz} rev/s`] : ['todo', ''],
+    body: () => `<div class="row"><button class="btn sm" data-a="stall">Suggest from data</button></div><p class="hint">Uses the slowest steady spin rate seen so far. Run the fan down slowly first for a better estimate.</p>` },
+  window: { t: 'Choose the rate averaging window', why: 'The board counts pulses over this window. Short: fast but jittery. Long: smooth but delayed. Try each and watch the Score tile.',
+    st: () => ST.windowTried ? ['done', `${S.board.rotor.rotor_window_ms} ms`] : ['todo', `${S.board.rotor.rotor_window_ms} ms`],
+    body: () => `<div class="row">${[25, 50, 100, 150].map(v => `<button class="btn sm${S.board.rotor.rotor_window_ms === v ? ' primary' : ''}" data-a="win" data-v="${v}">${v} ms</button>`).join('')}</div><p class="hint">Each choice is pushed to the board and starts a new segment if you are recording.</p>` },
+  response: { t: 'Fit smoothing α and lag compensation', why: 'On speed steps, trades noise against lag to minimise MSE. This is the step that wins or loses the ranking.',
+    st: () => ST.respFit ? ['done', `α ${S.params[S.model].ema_alpha}`] : ['todo', ''],
+    body: () => `<div class="row"><button class="btn sm" data-a="fanon">Fan on (steps)</button><button class="btn sm primary" data-a="fitresp">Fit response (60 s)</button></div>` },
+  push: { t: 'Push to the sensor and verify', why: 'Sends the settings, then checks that the board output scores like the PC preview.',
+    st: () => { const r = pushedOk(); return r.ok ? ['done', `board ${devMet.mse.toFixed(4)}`] : r.dirty.length ? ['todo', `${r.dirty.length} unpushed`] : ['warn', devMet && curMet ? `board ${devMet.mse.toFixed(3)} vs ${curMet.mse.toFixed(3)}` : '']; },
+    body: () => `<div class="row"><button class="btn sm primary" data-a="push">Push settings</button><button class="btn sm" data-a="scoreboard">Score the board output</button></div><p class="hint">After a push, wait one scoring window (30 s) before comparing.</p>` },
+  save: { t: 'Save calibration and a verification run', why: 'Export the firmware header and record a clean 60 s run as evidence for the report.',
+    st: () => ST.exported ? ['done', 'exported'] : ['todo', ''],
+    body: () => `<div class="row"><button class="btn sm primary" data-a="export">Export / install</button><button class="btn sm" data-a="verify">Record 60 s run</button></div>` },
+};
+const STEP_ORDER = { sqrt: ['connect', 'tare', 'weights', 'zero', 'sweep', 'curve', 'response', 'push', 'save'], rotor: ['connect', 'sweep', 'curve', 'stall', 'window', 'response', 'push', 'save'] };
+const val = x => typeof x === 'function' ? x() : x;
+function renderSteps(full) {
+  if (!$('steps')) return;
+  const order = STEP_ORDER[S.model];
+  if (full || $('steps').dataset.model !== S.model || $('steps').childElementCount !== order.length) {
+    $('steps').dataset.model = S.model;
+    if (!order.includes(ST.open)) ST.open = order.find(id => STEP_DEFS[id].st()[0] !== 'done') || order[0];
+    $('steps').innerHTML = order.map(id => `<li class="step" id="step_${id}"><button class="stH" data-step="${id}" aria-expanded="false"><span class="stT"></span><span class="stS"></span></button><div class="stB" hidden></div></li>`).join('');
+    $('steps').querySelectorAll('.stH').forEach(b => b.onclick = () => { ST.open = ST.open === b.dataset.step ? null : b.dataset.step; renderSteps(); });
+  }
+  for (const id of order) {
+    const d = STEP_DEFS[id], li = $('step_' + id), [state, txt] = d.st(), open = ST.open === id;
+    li.className = 'step ' + state + (open ? ' open' : '');
+    li.querySelector('.stT').textContent = val(d.t); li.querySelector('.stS').textContent = txt;
+    li.querySelector('.stH').setAttribute('aria-expanded', open);
+    const body = li.querySelector('.stB'); body.hidden = !open;
+    if (open && (body.dataset.k !== bodyKey(id) || full)) { body.innerHTML = `<p class="hint">${val(d.why)}</p>` + d.body(); body.dataset.k = bodyKey(id); wireStep(body); }
+  }
+}
+// re-render a step body only when its content inputs change, so typing in it isn't interrupted
+function bodyKey(id) { return id === 'sweep' ? coverage().map(s => s >= 3 ? 2 : s > 0.5 ? 1 : 0).join('') : id === 'weights' ? ST.wRows.length + ':' + !!ST.wRes + ':' + isSimLike() : id === 'window' ? S.board.rotor.rotor_window_ms : S.model + S.params[S.model].filter_kind; }
+setInterval(() => { if (!$('tab-steps').hidden) renderSteps(); }, 1000);
+async function stepMeasure(btn, sec, fn) {
+  if (ST.busy) return; ST.busy = true; const t = btn.textContent; btn.disabled = true; btn.textContent = 'Measuring…';
+  try { await fn(await measure(sec)); } catch (e) { log(e.message, 'e'); } finally { ST.busy = false; btn.disabled = false; btn.textContent = t; renderSteps(true); }
+}
+function wireStep(root) {
+  root.querySelectorAll('[data-a]').forEach(b => b.onclick = async () => {
+    const a = b.dataset.a, p = S.params[S.model];
+    if (a === 'setup') selectTab('board');
+    else if (a === 'moded') runCmd('MODE D');
+    else if (a === 'fanoff') fanSet(false);
+    else if (a === 'fanon') fanSet(true);
+    else if (a === 'tare') { runCmd('TARE'); renderSteps(); }
+    else if (a === 'wmeasure') {
+      const g = +$('wMass').value; if (!(g >= 0)) return;
+      const hung = isSimLike() ? hangMass(g) : false;
+      await stepMeasure(b, 3, async m => { ST.wRows.push({ mass: g, F: m.mean, sd: m.std }); ST.wRes = null; log(`Weights: ${g} g → ${m.mean.toFixed(4)} ± ${m.std.toFixed(4)} N`); });
+      if (hung) hangMass(0);
+    }
+    else if (a === 'wclear') { ST.wRows = []; ST.wRes = null; renderSteps(true); }
+    else if (a === 'wsolve') { ST.wRes = solveWeights(ST.wRows, S.board.sqrt.lc_n_per_count); if (!ST.wRes) log('Add at least one non-zero mass', 'w'); renderSteps(true); }
+    else if (a === 'wapply') { const sp = specOf('sqrt', 'lc_n_per_count'); sp.min = Math.min(sp.min, ST.wRes.newN * 0.9); sp.max = Math.max(sp.max, ST.wRes.newN * 1.1); setParam(sp, +ST.wRes.newN.toPrecision(6), true); pushParams(['lc_n_per_count']); ST.weights = ST.wRes; ST.wRows = []; ST.wRes = null; log('Load-cell scale applied and pushed', 'ok'); renderSteps(true); }
+    else if (a === 'zero') await stepMeasure(b, 3, async m => { if (Math.abs(m.gt) > 0.5) log(`Fan seems on (${m.gt.toFixed(1)} m/s); F₀ may be wrong`, 'w'); setParam(specOf('sqrt', 'sqrt_x0'), +m.mean.toFixed(5), true); buildParams(); ST.zeroed = true; log(`F₀ = ${m.mean.toFixed(4)} N`, 'ok'); });
+    else if (a === 'fitcurve' || a === 'fitresp') {
+      ST.pendingFit = a === 'fitcurve' ? 'curveFit' : 'respFit';
+      const want = a === 'fitcurve' ? new Set(MODELS[S.model].staticFree) : new Set(dynFree());
+      document.querySelectorAll('#freeChips input').forEach(i => i.checked = want.has(i.dataset.p));
+      $('fitWin').value = '60'; $('btnFit').click();
+    }
+    else if (a === 'stall') {
+      const f = featureArr(), v = []; for (let i = 0; i < B.t.length; i++) if (f[i] > 0.2 && B.gt[i] < 3.5) v.push(f[i]);
+      if (v.length < FS) { log('Not enough slow-speed data: run the fan down below ~3 m/s first', 'w'); return; }
+      v.sort((x, y) => x - y); const sug = +(0.85 * v[Math.floor(v.length * 0.02)]).toFixed(2);
+      setParam(specOf('rotor', 'rotor_min_hz'), sug, true); buildParams(); ST.stallSet = true; log(`Stall cut-off set to ${sug} rev/s`, 'ok'); renderSteps(true);
+    }
+    else if (a === 'win') { const v = +b.dataset.v; S.params.rotor.rotor_window_ms = v; pushParams(['rotor_window_ms']); ST.windowTried = true; log(`Rate window ${v} ms pushed`); renderSteps(true); }
+    else if (a === 'push') pushParams();
+    else if (a === 'scoreboard') document.querySelector('#scoreSeg [data-v=dev]').click();
+    else if (a === 'export') showExport();
+    else if (a === 'verify') { if (!REC.on) recStart(); selectTab('rec'); setTimeout(() => { if (REC.on) recStop(); }, 60000); log('Recording a 60 s verification run'); }
+  });
+}
+function selectTab(name) { document.querySelector(`.tabs button[data-tab="${name}"]`).click(); }
+
+/* ---------- Setup tab: hardware, ground truth and past runs (needs python -m calib serve) ---------- */
+const GT_HINT = { cmd: ['Command', 'python3 gt.py'], module: ['File and function', 'gt.py:read_sample'], port: ['Serial port', '/dev/tty.usbserial-…'], none: ['', ''] };
+$('selGtKind').onchange = () => { const k = $('selGtKind').value; $('gtValueLbl').textContent = GT_HINT[k][0]; $('gtValue').placeholder = GT_HINT[k][1]; $('gtValue').disabled = k === 'none'; };
+$('btnPorts').onclick = () => send({ type: 'ports' });
+$('btnRuns').onclick = () => send({ type: 'list_runs' });
+$('btnConnect').onclick = () => {
+  if (!$('selPort').value) { $('srcStatus').textContent = 'Pick the Nucleo port first'; return; }
+  send({ type: 'connect', source: 'serial', sensor_port: $('selPort').value, baud: +$('selBaud').value, gt_kind: $('selGtKind').value, gt_value: $('gtValue').value.trim() || undefined, model: S.model });
+  $('srcStatus').textContent = 'Connecting…';
+};
+$('btnUseSim').onclick = () => { send({ type: 'connect', source: 'sim', model: S.model }); $('srcStatus').textContent = 'Switching to the simulator…'; };
+$('btnReplay').onclick = () => { const r = $('selRun').value; if (r) { send({ type: 'connect', source: 'replay', replay_file: r, model: S.model }); $('srcStatus').textContent = 'Loading replay…'; } };
+$('btnRunSummary').onclick = () => { const r = $('selRun').value; if (r) send({ type: 'run_summary', name: r }); };
+function renderRuns(runs) {
+  $('selRun').innerHTML = runs.length ? runs.map(r => `<option value="${esc(r.name)}">${esc(r.name)}${r.duration_s ? ` · ${Math.round(r.duration_s)} s` : ''}${Number.isFinite(r.best_mse_pc) ? ` · best ${r.best_mse_pc.toFixed(3)}` : ''}</option>`).join('') : '<option value="">No recordings yet</option>';
+}
+function renderRunSummary(m) {
+  const segs = m.segments || [];
+  $('runSummary').innerHTML = `<table><thead><tr><th>#</th><th>Length</th><th>What changed</th><th>MSE</th></tr></thead><tbody>${segs.map(sg => {
+    const ch = sg.changed; const txt = Array.isArray(ch) ? (ch.length ? ch.map(labelOf).join(', ') : 'start') : changeText(ch);
+    const mm = sg.metrics_pc || sg.metrics || {}; return `<tr><td>${sg.pset ?? sg.segment}</td><td>${(sg.duration_s || 0).toFixed(1)} s</td><td class="wrap">${esc(txt)}</td><td>${Number.isFinite(mm.mse) ? mm.mse.toFixed(4) : '–'}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+function esc(x) { return String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ---------- Live link to python -m calib serve ---------- */
+function send(msg) { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(msg)); }
+function connect() {
+  const local = /^https?:$/.test(location.protocol) && /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
+  if (!local) { log('Simulator mode. Run python -m calib serve to tune against the real tunnel.'); return; }
+  let ws; try { ws = new WebSocket(`ws://${location.host}/ws`); } catch (e) { log('Live link unavailable, using the simulator', 'w'); return; }
+  S.ws = ws;
+  ws.onopen = () => log('Connected to the calibration server', 'ok');
+  ws.onclose = () => { $('srcNoServer').hidden = false; $('srcServer').hidden = true; S.srvMode = null; if (S.mode !== 'sim') { setMode('sim', 'Disconnected'); log('Server connection lost, retrying in 2 s', 'e'); } S.ws = null; setTimeout(connect, 2000); };
+  ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch { return; } onServer(m); };
+}
+function setMode(mode, txt) {
+  if (REC.on) recStop();
+  S.mode = mode === 'sim' ? 'sim' : 'live'; const pill = $('modePill');
+  pill.className = 'pill ' + (mode === 'live' ? 'live' : mode === 'replay' ? 'warn' : txt === 'Disconnected' ? 'bad' : 'sim');
+  $('modeTxt').textContent = txt || { live: 'Live', replay: 'Replay', sim: 'Simulator', pysim: 'Server sim' }[mode];
+  $('simSec').hidden = S.mode !== 'sim';
+  for (const k of BKEYS) B[k].length = 0; S.history = []; S.marks = []; estDirty = true;
+}
+function onServer(m) {
+  if (m.type === 'hello') {
+    setMode(m.mode === 'sim' ? 'pysim' : m.mode);
+    S.srvMode = m.mode; $('srcNoServer').hidden = true; $('srcServer').hidden = false;
+    $('srcStatus').textContent = m.mode === 'live' ? `Live: ${m.sources?.sensor || ''}` : m.mode === 'replay' ? 'Replaying a recording' : 'Server simulator';
+    send({ type: 'ports' }); send({ type: 'list_runs' });
+    if (m.models) for (const [id, def] of Object.entries(m.models)) {
+      if (!MODELS[id]) continue;
+      for (const sp of def.params || []) { const own = specOf(id, sp.name); if (own && sp.step) own.step = sp.step; }
+    }
+    if (m.model && MODELS[m.model]) S.model = m.model;
+    if (m.params) { Object.assign(S.params[S.model], m.params); Object.assign(S.board[S.model], m.params); S.params[S.model].filter_kind = 1; widenRanges(S.model); }
+    syncBoard(m.board);
+    S.serverMethod = m.method ? methodMacro(m.method) : (m.telemetry?.method ? methodMacro(m.telemetry.method) : null);
+    buildModelSeg(); buildParams(); buildFree(); log(`Server: ${m.mode} mode, sensor ${MODELS[S.model].label}`, 'ok');
+  } else if (m.type === 'frame') {
+    if (S.paused) return;
+    if (m.replace) { for (const k of BKEYS) B[k].length = 0; estDirty = true; }
+    const n = m.t.length, start = B.t.length, raw = m.raw || {};
+    const fr = raw.feature ?? (S.model === 'rotor' ? raw.feature_rotor : raw.feature_sqrt);
+    for (let i = 0; i < n; i++) {
+      B.t.push(m.t[i]); B.gt.push(num(m.gt?.[i])); B.dev.push(num(m.dev?.[i]));
+      B.feature.push(num(fr?.[i])); B.rho.push(num(raw.rho?.[i])); B.temp_c.push(num(raw.temp_c?.[i])); B.pressure_pa.push(num(raw.pressure_pa?.[i]));
+      if (!fr && m.est) B.est.push(num(m.est[i]));
+      if (!m.replace) { tele.sensN++; tele.gtN++; }
+    }
+    if (fr) appendEst(start);
+    recCapture(start);
+    trimBuf();
+    if (m.telemetry) { S.serverTele = m.telemetry; if (m.telemetry.method) S.serverMethod = methodMacro(m.telemetry.method); }
+  } else if (m.type === 'params') {
+    if (m.model && MODELS[m.model] && m.model !== S.model) { S.model = m.model; buildModelSeg(); buildFree(); }
+    if (m.params) Object.assign(S.params[S.model], m.params);
+    syncBoard(m.board);
+    S.params[S.model].filter_kind = 1;   // the team's design is the EMA; a push switches a board still on its Butterworth default
+    widenRanges(S.model); buildParams(); markParamsChanged('server'); recMark('board', 'settings from server');
+  } else if (m.type === 'fit_result') {
+    if (!m.ok) { ST.pendingFit = null; setFitStatus(m.message || 'Fit failed', 'e'); log('Fit failed: ' + (m.message || ''), 'e'); return; }
+    const free = m.free || Object.keys(m.params);
+    applyFit({ method: m.method, params: Object.fromEntries(free.filter(k => k in m.params).map(k => [k, m.params[k]])), before: m.before, after: m.after, holdBefore: m.holdout_before, holdAfter: m.holdout_after, ms: (m.elapsed_s || 0) * 1000, hist: m.history, free, engine: 'scipy', prev: m.previous });
+  } else if (m.type === 'session') { REC.server = m; if (REC.cols) renderRec(); if (m.recording === false) send({ type: 'list_runs' }); }
+  else if (m.type === 'ports') {
+    const cur = m.sensor?.port || $('selPort').value;
+    $('selPort').innerHTML = '<option value="">–</option>' + (m.ports || []).map(pt => `<option value="${esc(pt.device)}"${pt.device === cur ? ' selected' : ''}>${esc(pt.device)}${pt.description && pt.description !== 'n/a' ? ' · ' + esc(pt.description) : ''}</option>`).join('');
+    if (m.gt?.kind && GT_HINT[m.gt.kind]) { $('selGtKind').value = m.gt.kind; $('selGtKind').onchange(); if (m.gt.value) $('gtValue').value = m.gt.value; }
+  }
+  else if (m.type === 'runs') renderRuns(m.runs || []);
+  else if (m.type === 'run_summary') renderRunSummary(m);
+  else if (m.type === 'exported') { log(`Wrote ${(m.files || []).length} files${m.installed ? ', installed into firmware/include' : ''}`, 'ok'); ST.exported = true; renderSteps(); }
+  else if (m.type === 'log') log(m.msg, m.level === 'error' ? 'e' : m.level === 'warning' ? 'w' : m.level === 'ok' ? 'ok' : '');
+}
+function num(v) { return v == null ? NaN : +v; }
+function methodMacro(m) { return /^METHOD_/.test(m) ? m : 'METHOD_' + String(m).toUpperCase(); }
+function widenRanges(model) { for (const s of specsFor(model)) { const v = S.params[model][s.name]; if (!Number.isFinite(v)) continue; if (v < s.min) s.min = v - Math.abs(v) * 0.1; if (v > s.max) s.max = v + Math.abs(v) * 0.1; } }
+// the board's own values (last GET), for "differs from board" markers and the push check
+function syncBoard(board) { if (!board) return; for (const s of specsFor(S.model)) if (Number.isFinite(board[s.name])) S.board[S.model][s.name] = board[s.name]; }
+function sendParams(obj) { send({ type: 'set_params', params: obj }); }
+
+/* ---------- Helpers ---------- */
+function $(id) { return document.getElementById(id); }
+function fmt(v, d) { return Number.isFinite(v) ? v.toFixed(d) : '–'; }
+function fmtP(v) { if (typeof v === 'string') return v; if (!Number.isFinite(v)) return ''; const a = Math.abs(v); return a !== 0 && (a < 1e-3 || a >= 1e5) ? v.toExponential(4) : +v.toPrecision(6) + ''; }
+function pct(a, b) { if (!(b > 0)) return '–'; const p = (a - b) / b * 100; return (p >= 0 ? '+' : '') + p.toFixed(0) + '%'; }
+function log(msg, cls = '') { const d = document.createElement('div'); d.className = cls; d.textContent = `${new Date().toTimeString().slice(0, 8)}  ${msg}`; $('log').prepend(d); while ($('log').childElementCount > 300) $('log').lastChild.remove(); }
+
+/* ---------- Main loop ---------- */
+readColors();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => setTimeout(readColors, 0));
+new MutationObserver(() => setTimeout(readColors, 0)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+buildModelSeg(); buildParams(); buildFree(); buildTiles(); renderTruth(); renderCardText(); renderRec(); renderSteps(true);
+setMode('sim');
+// warm start: 25 s of simulated history so the page opens in a working state
+for (let k = 0; k < 25 * FS; k++) simPush(sim.step(S.board));
+recomputeEst(); resetEstState(); computeMetrics();
+for (let k = 0; k < 6; k++) S.history.push({ t: nowT() - (6 - k) * 2, mse: curMet ? curMet.mse : 0 });
+connect();
+let lastDraw = 0;
+function loop(ts) {
+  requestAnimationFrame(loop);
+  if (S.mode === 'sim') simTick();
+  if (ts - lastDraw < 33) return; lastDraw = ts;
+  if (estDirty) { recomputeEst(); resetEstState(); }
+  try {
+    drawTs(); drawTc(); drawSc();
+    S.c2 === 'bins' ? drawBins($('cvC2')) : drawHist($('cvC2'));
+    S.c4 === 'hist' ? drawHistory($('cvC4')) : drawRaw($('cvC4'));
+    renderReadout();
+  } catch (e) { console.error(e); }
+}
+requestAnimationFrame(loop);
+window.addEventListener('resize', () => { lastDraw = 0; if (S.lastFit) renderFitResult(); });
+})();
+</script>
