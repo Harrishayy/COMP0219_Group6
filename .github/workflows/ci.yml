@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+      - run: pip install platformio
+      - name: Unit tests (lib/airmath, native)
+        run: pio test -d firmware -e native
+      - name: Build every firmware env
+        run: |
+          pio run -d firmware \
+            -e airspeed -e airspeed_cup_hall -e airspeed_drag_plate -e airspeed_cantilever \
+            -e env_monitor -e i2c_scan -e loadcell_test -e encoder_test -e hall_test -e imu_test
+
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r host/requirements.txt
+      - run: pytest host -q
