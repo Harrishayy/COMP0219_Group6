@@ -436,15 +436,6 @@ def setpoint(profile: str, t: np.ndarray) -> np.ndarray:
 class SimTruth:
     """Hidden 'true' physics of the simulated rig. Fits should recover these."""
 
-    # rotor: steady-state rev/s from wind speed; slightly nonlinear so a line is not perfect
-    rotor_slope: float = 2.35        # m/s per rev/s
-    rotor_offset: float = 0.45       # m/s starting speed
-    rotor_curv: float = 0.004        # fractional curvature
-    rotor_dist_const_m: float = 1.6  # rotor lag tau = L / v
-    rotor_ppr: int = 96              # EM14, 24 cycles/rev decoded in quadrature (x4)
-    rotor_spindown_s: float = 0.8    # aerodynamic decay once the wind can no longer drive the cups
-    rotor_friction: float = 1.5      # rev/s^2 bearing friction: brings the rotor to a full stop
-    # drag plate
     cda: float = 0.0118              # -> sqrt_k = 2/cda = 169.5
     preload_n: float = 0.0           # mechanical preload
     plate_fn_hz: float = 6.0
@@ -466,23 +457,23 @@ class SimTruth:
 
 
 class SimulatedTunnel:
-    """Stateful wind-tunnel + Nucleo simulator.
+    """Stateful wind-tunnel + drag-plate Nucleo simulator.
 
     Produces the GT stream and the board's debug columns. Also acts as a fake board: `command()`
     understands SET / GET / MODE / TARE, so the dashboard push path can be exercised end to end.
-    The board method (which feature goes in the `feature` column) follows `model`.
     """
 
-    def __init__(self, model: str = "rotor", profile: str = "steps", seed: int = 0, fs: float = 200.0,
-                 truth: SimTruth | None = None):
+    method = models.BOARD_METHOD
+
+    def __init__(self, profile: str = "steps", seed: int = 0, fs: float = 200.0, truth: SimTruth | None = None):
         self.fs, self.dt = fs, 1.0 / fs
         self.truth = truth or SimTruth()
         self.rng = np.random.default_rng(seed)
-        self.profile, self.model = profile, model
+        self.profile = profile
         self.t, self.n = 0.0, 0
         tr = self.truth
-        # board parameters: defaults, but tared with a small error (gives a non-zero sqrt_x0 to find)
-        self.board = {**models.default_params("rotor"), **models.default_params("sqrt")}
+        # an unconfigured board (Butterworth smoother), tared with a small error (a non-zero F0 to find)
+        self.board = {**models.default_params(), "filter_kind": 0.0, "ema_alpha": 1.0}
         self.board["lc_offset"] = tr.lc_offset + 900.0
         self.board_state = models.DynState()
         # filter states
@@ -495,9 +486,6 @@ class SimulatedTunnel:
         wn = 2 * math.pi * tr.plate_fn_hz
         num, den, _ = cont2discrete(([wn * wn], [1, 2 * tr.plate_zeta * wn, wn * wn]), self.dt, method="bilinear")
         self._plate = (np.ravel(num), np.ravel(den), np.zeros(2))
-        self._rev = 0.0
-        self._f_rotor = 0.0
-        self._hist: deque = deque()  # (t, counts) for the rotor rate estimator
         self._lc_recent: deque = deque(maxlen=100)
         self.temp0, self.p0 = 22.3, 100870.0
         # operator controls used by the dashboard's guided steps
@@ -531,17 +519,12 @@ class SimulatedTunnel:
             return ["#cols," + ",".join(DEFAULT_COLS)]
         return [f"#err unknown command {cmd}"]
 
-    @property
-    def method(self) -> str:
-        """Board method string as the firmware prints it in `#cal`."""
-        return "cup_encoder" if self.model == "rotor" else "drag_plate"
-
     def _rho_now(self) -> float:
         return float(models.air_density(self.p0, self.temp0))
 
     # ---- physics
     def step(self, n: int) -> dict:
-        """Advance n samples. Returns arrays: t, v_true, gt, and debug columns + feature_rotor/_sqrt."""
+        """Advance n samples. Returns arrays: t, v_true, gt and the board's debug columns."""
         tr, rng, dt = self.truth, self.rng, self.dt
         t = self.t + dt * np.arange(1, n + 1)
         sp = setpoint(self.profile, t) if self.fan_on else np.zeros(n)
@@ -565,38 +548,14 @@ class SimulatedTunnel:
         f_mech, self._plate = self._lf(b, a, force, zi)
         counts = np.round(tr.lc_offset + f_mech / tr.lc_n_per_count + tr.lc_noise_counts * rng.standard_normal(n))
         self._lc_recent.extend(counts.tolist())
-        feat_sqrt = (counts - self.board["lc_offset"]) * self.board["lc_n_per_count"]
-
-        # rotor: speed-dependent first-order lag, encoder quantisation, sliding-window rate estimate
-        feat_rot = np.empty(n)
-        win = max(self.board["rotor_window_ms"], 5.0) / 1000.0
-        for i in range(n):
-            v = v_true[i]
-            f_ss = 0.0 if v < tr.rotor_offset * 1.6 else (v - tr.rotor_offset) / tr.rotor_slope * (1 - tr.rotor_curv * (v - 6))
-            if f_ss > 0.0:
-                tau = tr.rotor_dist_const_m / max(v, 0.5)
-                self._f_rotor += (f_ss - self._f_rotor) * min(dt / tau, 1.0)
-            else:  # below stall: drag decay plus bearing friction, so the cups actually stop
-                self._f_rotor = max(0.0, self._f_rotor * (1.0 - min(dt / tr.rotor_spindown_s, 1.0))
-                                    - tr.rotor_friction * dt)
-            self._rev += self._f_rotor * dt
-            c = math.floor(self._rev * tr.rotor_ppr)
-            self._hist.append((t[i], c))
-            while len(self._hist) > 2 and t[i] - self._hist[1][0] >= win:
-                self._hist.popleft()
-            t0, c0 = self._hist[0]
-            feat_rot[i] = (c - c0) / tr.rotor_ppr / (t[i] - t0) if t[i] > t0 else 0.0
-
-        feature = feat_rot if self.model == "rotor" else feat_sqrt
-        raw = {"feature": feature, "rho": rho_meas}
-        v_board = models.apply(self.model, self.board, raw, self.fs, self.board_state)
+        feature = (counts - self.board["lc_offset"]) * self.board["lc_n_per_count"]
+        v_board = models.apply(self.board, {"feature": feature, "rho": rho_meas}, self.fs, self.board_state)
         n_col = self.n + np.arange(1, n + 1)
         keep = rng.random(n) >= tr.drop_prob  # simulated dropped ticks: n jumps by 2
         self.t, self.n = float(t[-1]), int(n_col[-1])
         out = {
             "t": t, "v_true": v_true, "gt": gt, "n": n_col.astype(float), "v": v_board, "feature": feature,
             "rho": rho_meas, "temp_c": temp, "pressure_pa": press,
-            "feature_rotor": feat_rot, "feature_sqrt": feat_sqrt,
         }
         return {k: v[keep] for k, v in out.items()}
 
@@ -609,9 +568,8 @@ class SimulatedTunnel:
         """Offline run: perfectly aligned streams (t_g == t_s), handy for tests and demos."""
         chunks = [self.step(200) for _ in range(int(math.ceil(seconds)))]
         cat = {k: np.concatenate([c[k] for c in chunks]) for k in chunks[0]}
-        sensor_cols = ["n", "v", "feature", "rho", "temp_c", "pressure_pa", "feature_rotor", "feature_sqrt"]
-        return Run(cat["t"], {c: cat[c] for c in sensor_cols}, cat["t"].copy(), cat["gt"],
-                   {"source": "sim", "model": self.model, "profile": self.profile, "v_true": cat["v_true"]})
+        return Run(cat["t"], {c: cat[c] for c in DEFAULT_COLS}, cat["t"].copy(), cat["gt"],
+                   {"source": "sim", "profile": self.profile, "v_true": cat["v_true"]})
 
 
 class SimSource(Source):
@@ -644,8 +602,7 @@ class SimSource(Source):
                 d = self.sim.step(chunk)
             for i in range(len(d["t"])):
                 ts = t_wall0 + (d["t"][i] - t_sim0)
-                self.on_sensor(ts, {k: float(d[k][i]) for k in
-                                    ("n", "v", "feature", "rho", "temp_c", "pressure_pa", "feature_rotor", "feature_sqrt")})
+                self.on_sensor(ts, {k: float(d[k][i]) for k in DEFAULT_COLS})
                 self.on_gt(ts + self.gt_latency_s, float(d["gt"][i]))
             due = t_wall0 + (self.sim.t - t_sim0)
             wait = due - time.perf_counter()

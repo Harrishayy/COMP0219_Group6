@@ -1,4 +1,4 @@
-"""(1) The PC model chain is bit-for-bit the firmware tick(): map -> Median3 -> lead -> EMA | Butterworth -> clamp."""
+"""(1) The PC drag-plate chain is bit-for-bit the firmware tick(): map -> Median3 -> lead -> EMA | Butterworth -> clamp."""
 import math
 
 import numpy as np
@@ -52,13 +52,8 @@ class FirmwareTick:
         return max(out, 0.0)
 
 
-def _inputs(model_id, n=600):
+def _inputs(n=600):
     rng = np.random.default_rng(1)
-    if model_id == "rotor":  # cup anemometer: rev/s
-        x = np.clip(np.cumsum(rng.normal(0, 0.1, n)) + 2, -0.5, None)
-        p = {"rotor_slope": 2.3, "rotor_offset": 0.4, "rotor_min_hz": 0.3}
-        static = [0.0 if not f >= 0.3 else max(2.3 * f + 0.4, 0.0) for f in x]
-        return p, {"feature": x}, static
     x = np.abs(np.cumsum(rng.normal(0, 0.01, n))) + rng.normal(0, 0.005, n)  # drag force, N
     rho = 1.19 + rng.normal(0, 0.001, n)
     p = {"sqrt_k": 170.0, "sqrt_x0": 0.003}
@@ -66,37 +61,39 @@ def _inputs(model_id, n=600):
     return p, {"feature": x, "rho": rho}, static
 
 
-@pytest.mark.parametrize("model_id", ["rotor", "sqrt"])
 @pytest.mark.parametrize("lead_tau,filter_kind,ema_alpha,lpf_hz", [
     (0.0, 1, 0.2, 10.0), (0.12, 1, 0.05, 10.0), (0.05, 1, 1.0, 10.0), (0.0, 1, 0.0, 10.0),  # EMA (alpha floor)
-    (0.0, 0, 1.0, 10.0), (0.12, 0, 1.0, 6.0), (0.05, 0, 1.0, 0.0),                          # unconfigured board
+    (0.0, 0, 1.0, 10.0), (0.12, 0, 1.0, 6.0), (0.05, 0, 1.0, 0.0),                          # Butterworth
 ])
-def test_chain_matches_firmware(model_id, lead_tau, filter_kind, ema_alpha, lpf_hz):
-    p, raw, static = _inputs(model_id)
+def test_chain_matches_firmware(lead_tau, filter_kind, ema_alpha, lpf_hz):
+    p, raw, static = _inputs()
     p.update(lead_tau=lead_tau, filter_kind=filter_kind, ema_alpha=ema_alpha, lpf_hz=lpf_hz)
     tick = FirmwareTick(lead_tau, filter_kind, ema_alpha, lpf_hz)
     ref = np.array([tick.update(v) for v in static])
-    np.testing.assert_allclose(models.apply(model_id, p, raw), ref, atol=1e-9)
+    np.testing.assert_allclose(models.apply(p, raw), ref, atol=1e-9)
     # streaming in odd-sized chunks (as the live server does) gives the same output
     st, parts, i = models.DynState(), [], 0
     for k in (1, 2, 5, 37, 200, 1000):
         sl = slice(i, min(i + k, len(ref)))
-        parts.append(models.apply(model_id, p, {c: v[sl] for c, v in raw.items()}, state=st))
+        parts.append(models.apply(p, {c: v[sl] for c, v in raw.items()}, state=st))
         i = sl.stop
     np.testing.assert_allclose(np.concatenate(parts), ref, atol=1e-9)
 
 
+def _plate(force, n):  # k = 1, F0 = 0, rho = 1: v = sqrt(F)
+    return {"feature": np.full(n, force), "rho": np.ones(n)}
+
+
 def test_switching_filter_kind_resets_the_smoother():
-    p = {"rotor_slope": 1.0, "rotor_offset": 0.0, "rotor_min_hz": 0.0, "filter_kind": 1, "ema_alpha": 0.1}
+    p = {"sqrt_k": 1.0, "sqrt_x0": 0.0, "filter_kind": 1, "ema_alpha": 0.1}
     st = models.DynState()
-    models.apply("rotor", p, {"feature": np.full(50, 2.0)}, state=st)
-    models.apply("rotor", dict(p, filter_kind=0, lpf_hz=5.0), {"feature": np.full(50, 6.0)}, state=st)
-    back = models.apply("rotor", p, {"feature": np.full(5, 6.0)}, state=st)
+    models.apply(p, _plate(4.0, 50), state=st)
+    models.apply(dict(p, filter_kind=0, lpf_hz=5.0), _plate(36.0, 50), state=st)
+    back = models.apply(p, _plate(36.0, 5), state=st)
     assert back[0] == pytest.approx(6.0)  # re-primed, not 2 + 0.1 * (6 - 2) from the stale EMA
 
 
 def test_missing_samples_do_not_poison_the_filter():
-    x = np.array([3.0, np.nan, 3.0, 3.0, np.nan, 3.0])
-    y = models.apply("rotor", {"rotor_slope": 1, "rotor_offset": 0, "rotor_min_hz": 0, "filter_kind": 1,
-                               "ema_alpha": 0.3}, {"feature": x})
+    raw = {"feature": np.array([9.0, np.nan, 9.0, 9.0, np.nan, 9.0]), "rho": np.ones(6)}
+    y = models.apply({"sqrt_k": 1, "sqrt_x0": 0, "filter_kind": 1, "ema_alpha": 0.3}, raw)
     assert np.all(np.isfinite(y))

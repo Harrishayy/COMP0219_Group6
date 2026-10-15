@@ -160,6 +160,11 @@ tr.cur td { background: var(--sunk); }
 .cov span.on { background: var(--good-bg); color: var(--good); }
 .cov span.part { background: var(--warn-bg); color: var(--warn); }
 .wtbl input { width: 70px; }
+.dg { border: 1px solid var(--line); border-radius: var(--r); padding: 7px 9px; display: flex; flex-direction: column; gap: 4px; }
+.dg.high { border-color: var(--bad); } .dg.medium { border-color: var(--warn); }
+.dgT { font-weight: 650; display: flex; gap: 7px; align-items: center; }
+.dgA { font-size: 12px; }
+details summary { cursor: pointer; }
 
 /* Main */
 .main { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; }
@@ -226,7 +231,7 @@ tr.cur td { background: var(--sunk); }
 
 <div class="app">
 <header class="rail">
-  <div class="brand"><h1>Airspeed Calibration Bench</h1><small>COMP0219 · 2–10 m/s · 200 Hz</small></div>
+  <div class="brand"><h1>Airspeed Calibration Bench</h1><small>Drag plate · COMP0219 · 2–10 m/s · 200 Hz</small></div>
   <span id="modePill" class="pill sim"><span class="dot"></span><span id="modeTxt">Simulator</span></span>
   <div class="tele">
     <div title="Rate the sensor stream is arriving at. Should be 200 Hz."><label>Sensor</label><span id="tSens">–</span></div>
@@ -249,26 +254,18 @@ tr.cur td { background: var(--sunk); }
     <nav class="tabs" role="tablist" aria-label="Controls">
       <button role="tab" aria-selected="true" data-tab="steps">Steps</button>
       <button role="tab" aria-selected="false" data-tab="tune">Tune</button>
-      <button role="tab" aria-selected="false" data-tab="fit">Fit</button>
+      <button role="tab" aria-selected="false" data-tab="fit">Fix<span class="badge" id="fixBadge" hidden></span></button>
       <button role="tab" aria-selected="false" data-tab="rec">Record<span class="badge" id="recBadge" hidden></span></button>
       <button role="tab" aria-selected="false" data-tab="board">Setup</button>
       <button role="tab" aria-selected="false" data-tab="log">Log</button>
     </nav>
 
     <div class="panel" id="tab-steps" role="tabpanel">
-      <div class="field">
-        <span class="sh">Method</span>
-        <div class="seg" id="modelSeg2" role="group" aria-label="Method"></div>
-      </div>
       <p class="hint">Work down the list. Each step checks itself against the live data; you can redo any step.</p>
       <ol class="steps" id="steps"></ol>
     </div>
 
     <div class="panel" id="tab-tune" role="tabpanel" hidden>
-      <div class="field">
-        <span class="sh">Method</span>
-        <div class="seg" id="modelSeg" role="group" aria-label="Method"></div>
-      </div>
       <p class="hint" id="modelHint"></p>
       <div class="formula" id="formula"></div>
       <div class="row" id="plateRow" hidden>
@@ -286,6 +283,23 @@ tr.cur td { background: var(--sunk); }
     </div>
 
     <div class="panel" id="tab-fit" role="tabpanel" hidden>
+      <span class="sh">What to change</span>
+      <p class="hint">Checks the scoring window against the pitot every 2 s and says what is wrong and what to change. Static checks use only held speeds, so lag is not mistaken for a calibration error.</p>
+      <div id="diag" style="display:flex;flex-direction:column;gap:6px"></div>
+      <details class="hint"><summary>All symptoms and fixes</summary>
+        <table style="margin-top:6px"><thead><tr><th>Symptom</th><th>Change</th></tr></thead><tbody>
+          <tr><td class="wrap">Same % error at every speed</td><td class="wrap">Cd·A (or redo the load-cell scale)</td></tr>
+          <tr><td class="wrap">Error large at 2–4 m/s, small at 8–10</td><td class="wrap">Zero-flow force F₀</td></tr>
+          <tr><td class="wrap">Reads 0 while the wind blows</td><td class="wrap">TARE with the fan off, then re-measure F₀</td></tr>
+          <tr><td class="wrap">Bias creeps over minutes</td><td class="wrap">Warm up, re-TARE, re-measure F₀</td></tr>
+          <tr><td class="wrap">Late on speed changes</td><td class="wrap">Raise α (or the cutoff), or add lag compensation</td></tr>
+          <tr><td class="wrap">Jittery at steady speed</td><td class="wrap">Lower α (or the cutoff)</td></tr>
+          <tr><td class="wrap">Swings past the new speed</td><td class="wrap">Less lag compensation, or Butterworth below the ringing frequency</td></tr>
+          <tr><td class="wrap">Error changes with speed after the best fit</td><td class="wrap">Cd varies with speed: fit over 2–10 m/s holds</td></tr>
+          <tr><td class="wrap">Air density outside 1.10–1.30</td><td class="wrap">Check the baro and temperature (ENV)</td></tr>
+          <tr><td class="wrap">Pitot jittery below 3 m/s</td><td class="wrap">Robust fit, longer holds; don't chase it</td></tr>
+        </tbody></table></details>
+      <span class="sh" style="margin-top:6px">Auto-fit</span>
       <p class="hint">Let an optimiser search for the settings that best match the ground truth over the last few seconds of data.</p>
       <div class="row">
         <div class="field" style="flex:1;min-width:140px">
@@ -328,6 +342,7 @@ tr.cur td { background: var(--sunk); }
             <select id="selGtKind"><option value="cmd">their script (command)</option><option value="module">Python function</option><option value="port">serial port</option><option value="none">none</option></select></div>
           <div class="field" style="flex:1;min-width:120px"><label class="hint" for="gtValue" id="gtValueLbl">Command</label><input id="gtValue" class="note-in" placeholder="python3 gt.py"></div>
         </div>
+        <label class="chip" style="align-self:flex-start"><input type="checkbox" id="gtPressure"> Script prints pitot pressure in Pa (convert with v = √(2·Δp/ρ))</label>
         <div class="row">
           <button class="btn primary" id="btnConnect">Connect hardware</button>
           <button class="btn" id="btnUseSim">Use simulator</button>
@@ -382,7 +397,7 @@ tr.cur td { background: var(--sunk); }
           <button class="btn sm" id="btnSimReset">Restart run</button>
         </div>
         <div class="truth" id="truthBox" hidden></div>
-        <p class="hint">Stands in for the tunnel until hardware is connected: a fan with spin-up lag, a noisy pitot, a cup rotor with inertia and a ringing drag plate. Run <span class="mono">python -m calib serve</span> for the real streams.</p>
+        <p class="hint">Stands in for the tunnel until hardware is connected: a fan with spin-up lag, a noisy pitot, and a drag plate that rings on its load cell. Run <span class="mono">python -m calib serve</span> for the real streams.</p>
       </section>
     </div>
 
@@ -515,14 +530,14 @@ const WARM_S = 0.5;
 /* ---------- Model definitions (mirror firmware/lib/airmath + calibration/docs/SPEC.md §3) ----------
    label/what/lo/hi are the plain-language face of each firmware parameter. */
 const COMMON = [
-  // Output smoothing is the team's EMA: V = α·V_new + (1 − α)·V_previous. filter_kind = 1 selects it on the board;
-  // lpf_hz only exists so a board still on its Butterworth default previews correctly until the first push.
-  { name: 'filter_kind', label: 'Filter', value: 1, min: 0, max: 1, step: 1, unit: '', group: 'response', hidden: true, what: '' },
-  { name: 'ema_alpha', label: 'Smoothing α (EMA)', value: 0.2, min: 0.005, max: 1, step: 0.001, unit: '', group: 'response',
+  { name: 'filter_kind', label: 'Smoothing filter', value: 1, kind: 'choice', options: [[1, 'EMA (α)'], [0, 'Butterworth']], min: 0, max: 1, step: 1, unit: '', group: 'response',
+    what: 'EMA is the team design. Butterworth (2nd order) damps the plate\'s ringing more sharply for the same lag; try both.' },
+  { name: 'ema_alpha', label: 'Smoothing α (EMA)', value: 0.2, min: 0.005, max: 1, step: 0.001, unit: '', group: 'response', showIf: p => p.filter_kind >= 0.5,
     what: 'V = α·V_new + (1 − α)·V_previous. Too low: smooth but lags steps (hurts MSE). Too high: tracks instantly but noisy.', lo: 'smooth, laggy', hi: 'instant, noisy' },
-  { name: 'lpf_hz', label: 'Butterworth cutoff', value: 10, min: 0, max: 40, step: 0.1, unit: 'Hz', group: 'response', hidden: true, what: '' },
+  { name: 'lpf_hz', label: 'Butterworth cutoff', value: 6, min: 0.5, max: 40, step: 0.1, unit: 'Hz', group: 'response', showIf: p => !(p.filter_kind >= 0.5),
+    what: 'Cutoff of the 2nd-order low-pass. Set it below the plate\'s ringing frequency to kill the wobble.', lo: 'smoother, slower', hi: 'faster, noisier' },
   { name: 'lead_tau', label: 'Lag compensation', value: 0, min: 0, max: 0.6, step: 0.002, unit: 's', group: 'response',
-    what: 'Pushes the output ahead in time to cancel the cups\' spin-up delay or the plate\'s settling. 0 = off.', lo: 'none', hi: 'aggressive, overshoots' },
+    what: 'Pushes the output ahead in time to cancel the plate\'s settling delay. 0 = off.', lo: 'none', hi: 'aggressive, overshoots' },
   { name: 'rho_ref', label: 'Air density fallback', value: 1.204, min: 1.0, max: 1.35, step: 0.001, unit: 'kg/m³', group: 'env', hidden: true, what: '' },
 ];
 const GROUPS = {
@@ -531,22 +546,6 @@ const GROUPS = {
   board: { label: 'Load cell · applied on the board', tag: 'push to apply' },
 };
 const MODELS = {
-  rotor: {
-    label: 'Cup anemometer', short: 'Cups', method: 'METHOD_CUP_ENCODER',
-    hint: 'Each cup feels drag ½·ρ·Cd·A·v². The open cup facing the wind has a higher Cd than the back of the returning cup, so the rotor settles where the two drags balance. Its spin rate then rises in proportion to wind speed, which gives a straight-line calibration.',
-    formula: 'v = air per rev × spin rate + start-up speed', feature: 'rev/s', featLabel: 'Spin rate', simKey: 'feature_rotor',
-    params: [
-      { name: 'rotor_slope', label: 'Air per revolution', value: 0.1, min: 0.03, max: 0.25, step: 0.0005, unit: 'm/rev', group: 'curve',
-        what: 'Metres of air that pass for each turn of the rotor. Scales every reading.', lo: 'reads lower', hi: 'reads higher' },
-      { name: 'rotor_offset', label: 'Start-up speed', value: 0.3, min: -1, max: 2, step: 0.005, unit: 'm/s', group: 'curve',
-        what: 'Wind needed before the rotor starts to turn. Shifts every reading up or down.', lo: 'reads lower', hi: 'reads higher' },
-      { name: 'rotor_min_hz', label: 'Stall cut-off', value: 1.5, min: 0, max: 10, step: 0.1, unit: 'rev/s', group: 'curve',
-        what: 'Below this spin rate the output reads 0 m/s.', lo: 'reports slow creep', hi: 'zero until faster' },
-      { name: 'rotor_window_ms', label: 'Rate averaging window', value: 50, min: 10, max: 250, step: 5, unit: 'ms', group: 'response', board: true,
-        what: 'How long the board counts pulses for each spin-rate reading. Takes effect after a push.', lo: 'fast, jittery', hi: 'smooth, delayed' },
-    ],
-    staticFree: ['rotor_slope', 'rotor_offset'],
-  },
   sqrt: {
     label: 'Drag plate', short: 'Plate', method: 'METHOD_DRAG_PLATE',
     hint: 'The plate feels drag F = ½·ρ·Cd·A·v², measured by the load cell. Solving for speed gives v = √(2F ÷ (ρ·Cd·A)). Calibration finds the drag area Cd·A and the zero-flow force F₀ against the pitot.',
@@ -566,7 +565,7 @@ const MODELS = {
     staticFree: ['sqrt_k', 'sqrt_x0'],
   },
 };
-function dynFree() { return ['ema_alpha', 'lead_tau']; }
+function dynFree() { return S.params.sqrt.filter_kind >= 0.5 ? ['ema_alpha', 'lead_tau'] : ['lpf_hz', 'lead_tau']; }
 // airmath::Ema clamp: α in [1e-4, 1], NaN or ≤ 0 → 1e-4
 function emaAlpha(a) { return Number.isFinite(a) && a > 0 ? Math.min(1, Math.max(1e-4, a)) : 1e-4; }
 
@@ -588,10 +587,6 @@ function biquad(fc) {
 }
 function staticMap(model, p, x, rho) {
   if (!Number.isFinite(x)) return NaN;
-  if (model === 'rotor') {
-    if (!(x >= p.rotor_min_hz)) return 0;
-    const v = p.rotor_slope * x + p.rotor_offset; return v > 0 ? v : 0;
-  }
   if (!(rho > 0)) return 0;
   const arg = p.sqrt_k * (x - p.sqrt_x0) / rho; return arg > 0 ? Math.sqrt(arg) : 0;
 }
@@ -621,18 +616,18 @@ function runChain(model, p, feat, rho, i0, i1, out, outOff = 0) {
 
 /* ---------- State ---------- */
 const S = {
-  mode: 'sim', model: 'rotor',
-  params: { rotor: defaultsFor('rotor'), sqrt: defaultsFor('sqrt') },
-  board: { rotor: defaultsFor('rotor'), sqrt: defaultsFor('sqrt') },
+  mode: 'sim', model: 'sqrt',   // the drag plate is the only sensor
+  params: { sqrt: defaultsFor('sqrt') },
+  board: { sqrt: defaultsFor('sqrt') },
   hidden: { gt: false, est: false, dev: false },
   paused: false, autoPush: false, score: 'est', c2: 'bins', c4: 'hist',
   baseline: null, history: [], marks: [], lastFit: null, ws: null,
 };
-const B = { t: [], gt: [], dev: [], est: [], feature: [], rho: [], temp_c: [], pressure_pa: [], feature_rotor: [], feature_sqrt: [], dev_rotor: [], dev_sqrt: [] };
+const B = { t: [], gt: [], dev: [], est: [], feature: [], rho: [], temp_c: [], pressure_pa: [] };
 const BKEYS = Object.keys(B);
 function trimBuf() { if (B.t.length > MAX_N + 2000) { const k = B.t.length - MAX_N; for (const key of BKEYS) B[key].splice(0, k); } }
-function featureArr() { return S.mode === 'sim' ? B[MODELS[S.model].simKey] : B.feature; }
-function devArr() { return S.mode === 'sim' ? B['dev_' + S.model] : B.dev; }
+function featureArr() { return B.feature; }
+function devArr() { return B.dev; }
 function nowT() { return B.t.length ? B.t[B.t.length - 1] : 0; }
 let estDirty = true;
 function recomputeEst() {
@@ -644,15 +639,14 @@ function recomputeEst() {
 
 /* ---------- Tunnel simulator ---------- */
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-const TRUE = { rotor_slope: 0.1123, rotor_offset: 0.46, rotor_curv: -0.00035, stall: 0.8, dist_const: 1.3, ppr: 20,
-  cda: 0.0115, cd_re: 0.06, plate_fn: 7.0, plate_zeta: 0.22, lc_offset: 84213, lc_n_per_count: 1.021e-5, lc_noise: 22,
+const TRUE = { cda: 0.0115, cd_re: 0.06, plate_fn: 7.0, plate_zeta: 0.22, lc_offset: 84213, lc_n_per_count: 1.021e-5, lc_noise: 22,
   pitot_noise_pa: 0.12, pitot_tau: 0.012 };
 TRUE.sqrt_k = 2 / TRUE.cda;
 class Sim {
   constructor(seed = 7) { this.reset(seed); }
   reset(seed = 7) {
     this.rand = mulberry(seed); this.t = 0; this.n = 0; this.fan = 2; this.turb = 0; this.turb2 = 0;
-    this.rotorV = 0; this.rev = 0; this.revHist = []; this.F = 0; this.Fd = 0; this.pit = 2; this.temp = 21.4; this.press = 101180;
+    this.F = 0; this.Fd = 0; this.pit = 2; this.temp = 21.4; this.press = 101180;
     this.fanOff = false; this.loadG = 0;
   }
   gauss() { let u = 0, v = 0; while (!u) u = this.rand(); v = this.rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
@@ -683,15 +677,6 @@ class Sim {
     // Ground truth: Dwyer pitot (pressure noise, short lag) → v
     const dp = 0.5 * rho * v * v + this.gauss() * TRUE.pitot_noise_pa;
     this.pit += (Math.sign(dp) * Math.sqrt(2 * Math.abs(dp) / rho) - this.pit) * (1 - Math.exp(-dt / TRUE.pitot_tau));
-    // Rotor: inertia with distance constant, encoder quantisation over a sliding window
-    const fEq = v < TRUE.stall ? 0 : Math.max(0, (v - TRUE.rotor_offset) / TRUE.rotor_slope * (1 + TRUE.rotor_curv * v * v));
-    const tauR = TRUE.dist_const / Math.max(v, 0.6);
-    this.rotorV += (fEq - this.rotorV) * (1 - Math.exp(-dt / tauR));
-    this.rev += this.rotorV * dt;
-    const pulses = Math.floor(this.rev * TRUE.ppr);
-    this.revHist.push(pulses); if (this.revHist.length > 60) this.revHist.shift();
-    const winN = Math.max(1, Math.min(this.revHist.length - 1, Math.round(boardParams.rotor.rotor_window_ms / 1000 / dt)));
-    const fRotor = this.revHist.length > winN ? (this.revHist[this.revHist.length - 1] - this.revHist[this.revHist.length - 1 - winN]) / TRUE.ppr / (winN * dt) : 0;
     // Drag plate: Re-dependent Cd, 2nd-order mount, NAU7802 counts → board lc params → N
     const Fst = 0.5 * rho * TRUE.cda * (1 + TRUE.cd_re * (3 / (v + 1) - 0.4)) * v * v + this.loadG / 1000 * 9.80665;
     const wn = 2 * Math.PI * TRUE.plate_fn;
@@ -699,12 +684,12 @@ class Sim {
     this.F += this.Fd * dt;
     const counts = Math.round(TRUE.lc_offset + this.F / TRUE.lc_n_per_count + this.gauss() * TRUE.lc_noise);
     const fSqrt = (counts - boardParams.sqrt.lc_offset) * boardParams.sqrt.lc_n_per_count;
-    return { t: this.t, gt: this.pit, rho, temp: this.temp, press: this.press, fRotor, fSqrt };
+    return { t: this.t, gt: this.pit, rho, temp: this.temp, press: this.press, fSqrt };
   }
 }
 const sim = new Sim();
 const freshChain = () => ({ prev: NaN, s1: 0, s2: 0, primed: false, mc: 0, m0: 0, m1: 0, ema: 0, ep: false, fk: undefined });
-const simChain = { rotor: freshChain(), sqrt: freshChain() };
+const simChain = { sqrt: freshChain() };
 function chainStep(model, p, st, x, rho) {
   // incremental version of runChain (same order: map → Median3 → lead → LPF → clamp)
   const c = biquad(p.lpf_hz);
@@ -725,10 +710,8 @@ function chainStep(model, p, st, x, rho) {
 }
 function simPush(s) {
   B.t.push(s.t); B.gt.push(s.gt); B.rho.push(s.rho); B.temp_c.push(s.temp); B.pressure_pa.push(s.press);
-  B.feature_rotor.push(s.fRotor); B.feature_sqrt.push(s.fSqrt); B.feature.push(S.model === 'rotor' ? s.fRotor : s.fSqrt);
-  B.dev_rotor.push(chainStep('rotor', S.board.rotor, simChain.rotor, s.fRotor, s.rho));
-  B.dev_sqrt.push(chainStep('sqrt', S.board.sqrt, simChain.sqrt, s.fSqrt, s.rho));
-  B.dev.push(S.model === 'rotor' ? B.dev_rotor[B.dev_rotor.length - 1] : B.dev_sqrt[B.dev_sqrt.length - 1]);
+  B.feature.push(s.fSqrt);
+  B.dev.push(chainStep('sqrt', S.board.sqrt, simChain.sqrt, s.fSqrt, s.rho));
 }
 let simLast = performance.now(), simAcc = 0;
 function simTick() {
@@ -1118,7 +1101,7 @@ function drawTc() {
   ctx.globalAlpha = 1;
   const p = S.params[S.model], rho = lastFinite(B.rho) || p.rho_ref;
   const curve = (pp, color, dash) => { ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash(dash || []); ctx.beginPath(); let pen = false; for (let k = 0; k <= 200; k++) { const x = xmin + (xmax - xmin) * k / 200, v = staticMap(S.model, pp, x, rho); const y = F.Y(Math.min(12, v)); if (pen) ctx.lineTo(F.X(x), y); else { ctx.moveTo(F.X(x), y); pen = true; } } ctx.stroke(); ctx.setLineDash([]); };
-  if (S.mode === 'sim' && S.showTruth) { const tp = S.model === 'rotor' ? { rotor_slope: TRUE.rotor_slope, rotor_offset: TRUE.rotor_offset, rotor_min_hz: 0 } : trueSqrt(); curve({ ...p, ...tp }, C.good, [4, 4]); }
+  if (S.mode === 'sim' && S.showTruth) { const tp = trueSqrt(); curve({ ...p, ...tp }, C.good, [4, 4]); }
   curve(S.board[S.model], C.dev, [2, 3]);
   curve(p, C.est);
 }
@@ -1253,30 +1236,18 @@ function renderTele() {
   $('tGt').innerHTML = gth > 0 ? `${gth.toFixed(0)} Hz` : '<span class="delta-bad">none</span>';
   $('tDrops').textContent = sh.drops ?? tele.drops;
   const r = lastFinite(B.rho), tc = lastFinite(B.temp_c), p = lastFinite(B.pressure_pa), fx = lastFinite(featureArr());
-  $('tRawLbl').textContent = MODELS[S.model].featLabel; $('tRaw').textContent = Number.isFinite(fx) ? (S.model === 'sqrt' ? fx.toFixed(3) + ' N' : fx.toFixed(1) + ' rev/s') : '–';
+  $('tRawLbl').textContent = MODELS[S.model].featLabel; $('tRaw').textContent = Number.isFinite(fx) ? fx.toFixed(3) + ' N' : '–';
   $('tRho').textContent = Number.isFinite(r) ? r.toFixed(4) : '–'; $('tTemp').textContent = Number.isFinite(tc) ? tc.toFixed(2) + ' °C' : '–'; $('tBaro').textContent = Number.isFinite(p) ? (p / 100).toFixed(1) + ' hPa' : '–';
 }
 
 /* ---------- Params UI ---------- */
-function buildModelSeg() {
-  for (const id of ['modelSeg', 'modelSeg2']) {
-    $(id).innerHTML = Object.entries(MODELS).map(([k, m]) => `<button aria-pressed="${k === S.model}" data-m="${k}">${m.label}</button>`).join('');
-    $(id).querySelectorAll('button').forEach(b => b.onclick = () => setModel(b.dataset.m));
-  }
-}
-function setModel(m) {
-  if (!MODELS[m] || m === S.model) return;
-  S.model = m; buildModelSeg(); buildParams(); buildFree(); renderSteps(true);
-  if (S.mode === 'sim') { B.feature = B[MODELS[m].simKey].slice(); B.dev = B['dev_' + m].slice(); }
-  S.lastFit = null; renderFitResult(); markParamsChanged('model'); send({ type: 'set_model', model: m }); recMark('model');
-}
 function viewOf(s) { return s.view ? s.view : { unit: s.unit, min: s.min, max: s.max, step: s.step, to: x => x }; }
 function buildParams() {
   const M = MODELS[S.model];
   $('modelHint').textContent = M.hint; $('formula').textContent = M.formula;
   const specs = specsFor(S.model), p = S.params[S.model], bp = S.board[S.model];
   const order = ['curve', 'response', 'board', 'env'], groups = {};
-  specs.filter(s => !s.hidden).forEach(s => (groups[s.group] = groups[s.group] || []).push(s));
+  specs.filter(s => !s.hidden && (!s.showIf || s.showIf(p))).forEach(s => (groups[s.group] = groups[s.group] || []).push(s));
   $('params').innerHTML = order.filter(g => groups[g]).map(g => `<div class="pgroup"><div class="gh">${GROUPS[g].label}${GROUPS[g].tag ? `<span class="tag">${GROUPS[g].tag}</span>` : ''}</div>${groups[g].map(s => {
     const V = viewOf(s), v = p[s.name], u = (V.to(v) - V.min) / (V.max - V.min) * 1000;
     if (s.kind === 'choice') return `<div class="param${v !== bp[s.name] ? ' dirty' : ''}" id="pr_${s.name}">
@@ -1331,7 +1302,8 @@ function setParam(s, v, commit) {
 }
 function buildFree() {
   const specs = specsFor(S.model), def = new Set(MODELS[S.model].staticFree);
-  $('freeChips').innerHTML = specs.filter(s => !s.board && !s.hidden && s.name !== 'rotor_min_hz').map(s => `<label class="chip" title="${s.name}"><input type="checkbox" data-p="${s.name}"${def.has(s.name) ? ' checked' : ''}>${s.label}</label>`).join('');
+  const df = dynFree();
+  $('freeChips').innerHTML = specs.filter(s => !s.board && !s.hidden && s.kind !== 'choice' && (!['lpf_hz', 'ema_alpha'].includes(s.name) || df.includes(s.name))).map(s => `<label class="chip" title="${s.name}"><input type="checkbox" data-p="${s.name}"${def.has(s.name) ? ' checked' : ''}>${s.label}</label>`).join('');
 }
 document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
   const pr = b.dataset.preset, st = new Set(MODELS[S.model].staticFree);
@@ -1340,7 +1312,8 @@ document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
 
 /* ---------- Board push / commands ---------- */
 function firmwareParams(model) {
-  const p = S.params[model], names = specsFor(model).filter(s => !['rho_ref', 'lpf_hz'].includes(s.name)).map(s => s.name);
+  const p = S.params[model], ema = p.filter_kind >= 0.5;
+  const names = specsFor(model).filter(s => s.name !== 'rho_ref' && s.name !== (ema ? 'lpf_hz' : 'ema_alpha')).map(s => s.name);
   return Object.fromEntries(names.map(n => [n, p[n]]));
 }
 function pushParams(names) {
@@ -1364,7 +1337,7 @@ function runCmd(c) {
   if (c === 'TARE') { const g = lastFinite(B.gt); ST.tared = !(Math.abs(g) > 0.5); }
   if (S.mode !== 'live') {
     if (c === 'TARE') { S.board.sqrt.lc_offset = Math.round(TRUE.lc_offset + sim.F / TRUE.lc_n_per_count); S.params.sqrt.lc_offset = S.board.sqrt.lc_offset; buildParams(); recMark('tare'); log(`#ok lc_offset=${S.board.sqrt.lc_offset} (tared at ${sim.fan.toFixed(1)} m/s${sim.fan > 0.5 ? ': tare with the fan off!' : ''})`, sim.fan > 0.5 ? 'w' : 'ok'); }
-    else if (c === 'GET') log('#cal ' + JSON.stringify({ method: S.model === 'rotor' ? 'METHOD_CUP_ENCODER' : 'METHOD_DRAG_PLATE', ...firmwareParams(S.model) }));
+    else if (c === 'GET') log('#cal ' + JSON.stringify({ method: 'drag_plate', ...firmwareParams(S.model) }));
     else log(`(sim) ${c} has no effect`);
     return;
   }
@@ -1373,18 +1346,18 @@ function runCmd(c) {
 
 /* ---------- Baseline / export ---------- */
 $('btnBaseline').onclick = () => { const m = S.score === 'dev' ? devMet : curMet; if (!m) return log('No score yet', 'w'); S.baseline = { met: { ...m }, params: { ...S.params[S.model] }, model: S.model }; $('btnRevert').disabled = false; log(`Baseline pinned: MSE ${fmt(m.mse, 4)}`); renderTiles(); };
-$('btnRevert').onclick = () => { const b = S.baseline; if (!b) return; if (b.model !== S.model) setModel(b.model); Object.assign(S.params[S.model], b.params); sendParams(b.params); buildParams(); markParamsChanged('revert'); recMark('revert'); log('Restored baseline settings'); };
+$('btnRevert').onclick = () => { const b = S.baseline; if (!b) return; Object.assign(S.params[S.model], b.params); sendParams(b.params); buildParams(); markParamsChanged('revert'); recMark('revert'); log('Restored baseline settings'); };
 $('btnResetAll').onclick = () => { Object.assign(S.params[S.model], S.board[S.model]); sendParams(S.board[S.model]); buildParams(); markParamsChanged('reset'); recMark('reset'); log('Settings reset to the board values'); };
 let expTab = 'json';
 function cFloat(v) { const t = String(+(+v).toPrecision(7)); return t + (/[.e]/.test(t) ? 'f' : '.0f'); }
 function exportTexts() {
   const model = S.model, fp = firmwareParams(model), m = curMet, ts = new Date().toISOString();
-  const method = S.serverMethod || (model === 'rotor' ? 'METHOD_CUP_ENCODER' : 'METHOD_DRAG_PLATE');
-  const phys = model === 'sqrt' ? { cda_cm2: 2e4 / fp.sqrt_k, plate_area_cm2: +$('plateArea').value || null, cd: (2e4 / fp.sqrt_k) / (+$('plateArea').value || NaN) } : { air_per_rev_m: fp.rotor_slope, startup_speed_mps: fp.rotor_offset };
+  const method = 'METHOD_DRAG_PLATE';
+  const phys = { cda_cm2: 2e4 / fp.sqrt_k, plate_area_cm2: +$('plateArea').value || null, cd: (2e4 / fp.sqrt_k) / (+$('plateArea').value || NaN) };
   const json = JSON.stringify({ model, sensor: MODELS[model].label, method, params: fp, physical: phys, rho_ref: S.params[model].rho_ref, fit: S.lastFit ? { method: S.lastFit.method, engine: S.lastFit.engine, window_s: +$('fitWin').value, free: S.lastFit.free } : null,
     metrics_before: S.baseline ? S.baseline.met : null, metrics_after: m, source: S.mode, created: ts }, (k, v) => typeof v === 'number' ? +v.toPrecision(7) : v, 2);
   const h = `// Generated by calibration bench, ${ts}\n// Source: ${S.mode}${m ? `, window MSE ${m.mse.toFixed(4)} m^2/s^2, bias ${m.bias.toFixed(3)} m/s` : ''}\n#pragma once\n\n` +
-    (S.serverMethod ? `#define AIRSPEED_METHOD ${S.serverMethod}\n` : `// #define AIRSPEED_METHOD ${method}  // confirm against the build\n`) +
+    `#define AIRSPEED_METHOD ${method}\n` +
     Object.entries(fp).map(([k, v]) => `#define CAL_${k.toUpperCase()} ${cFloat(v)}`).join('\n') + '\n';
   const cmd = Object.entries(fp).filter(([k]) => k !== 'lc_offset').map(([k, v]) => `SET ${k} ${+v.toPrecision(7)}`).join('\n') + '\nGET\n';
   return { json, h, cmd };
@@ -1406,6 +1379,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.side .panel').forEach(p => p.hidden = p.id !== 'tab-' + b.dataset.tab);
   if (b.dataset.tab === 'rec') renderRec();
   if (b.dataset.tab === 'steps') renderSteps(true);
+  if (b.dataset.tab === 'fit') renderDiag();
 });
 $('btnPause').onclick = () => { S.paused = !S.paused; $('btnPause').textContent = S.paused ? 'Resume' : 'Pause'; $('btnPause').classList.toggle('on', S.paused); if (!S.paused) simLast = performance.now(); };
 $('btnFit').onclick = () => {
@@ -1419,8 +1393,8 @@ $('btnFit').onclick = () => {
   else setTimeout(browserFit, 20);
 };
 $('btnTruth').onclick = () => { S.showTruth = !S.showTruth; $('truthBox').hidden = !S.showTruth; $('btnTruth').textContent = S.showTruth ? 'Hide true values' : 'Reveal true values'; renderTruth(); };
-function renderTruth() { const t = trueSqrt(); $('truthBox').innerHTML = `Rotor: air per rev ${TRUE.rotor_slope}, start-up ${TRUE.rotor_offset} m/s (slightly curved, inertia ${TRUE.dist_const} m).<br>Drag: gain ≈ ${t.sqrt_k.toFixed(1)}, zero ≈ ${t.sqrt_x0.toFixed(4)} N with the board's load-cell settings (Cd varies ±${(TRUE.cd_re * 100).toFixed(0)} %).<br>Load cell: zero ${TRUE.lc_offset}, ${TRUE.lc_n_per_count.toExponential(3)} N/count. The green dashed line on the curve chart is the truth.`; }
-$('btnSimReset').onclick = () => { if (REC.on) recStop(); sim.reset(Math.floor(Math.random() * 1e6)); for (const k of BKEYS) B[k].length = 0; Object.assign(simChain.rotor, freshChain()); Object.assign(simChain.sqrt, freshChain()); S.history = []; S.marks = []; estDirty = true; log('Simulator restarted'); };
+function renderTruth() { const t = trueSqrt(); $('truthBox').innerHTML = `Drag area Cd·A ≈ ${(2e4 / t.sqrt_k).toFixed(1)} cm², zero-flow force ≈ ${t.sqrt_x0.toFixed(4)} N with the board's load-cell settings (Cd varies ±${(TRUE.cd_re * 100).toFixed(0)} %).<br>Load cell: zero ${TRUE.lc_offset}, ${TRUE.lc_n_per_count.toExponential(3)} N/count. The green dashed line on the curve chart is the truth.`; }
+$('btnSimReset').onclick = () => { if (REC.on) recStop(); sim.reset(Math.floor(Math.random() * 1e6)); for (const k of BKEYS) B[k].length = 0; Object.assign(simChain.sqrt, freshChain()); S.history = []; S.marks = []; estDirty = true; log('Simulator restarted'); };
 $('simProfile').onchange = () => { log('Fan profile: ' + $('simProfile').selectedOptions[0].text); if (REC.on) { REC.events.push({ t: nowT(), kind: 'note', detail: 'fan profile ' + $('simProfile').value }); } };
 document.querySelectorAll('#legTs span').forEach(s => s.onclick = () => { S.hidden[s.dataset.s] = !S.hidden[s.dataset.s]; s.classList.toggle('off', S.hidden[s.dataset.s]); });
 function segWire(id, key, after) { document.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => { S[key] = b.dataset.v; document.querySelectorAll(`#${id} button`).forEach(x => x.setAttribute('aria-pressed', x === b)); after && after(); }); }
@@ -1434,10 +1408,10 @@ cvTs.addEventListener('pointerleave', () => { view.hx = null; });
 /* ---------- Guided calibration steps ----------
    One checklist per method. Each step reads the live data to decide whether it is done, and its buttons
    drive the same functions as the rest of the page (TARE, fits, push, export, recording). */
-const ST = { tared: false, weights: null, wRows: [], zeroed: false, curveFit: false, respFit: false, exported: false, stallSet: false, windowTried: false, pendingFit: null, open: null, busy: false };
+const ST = { tared: false, weights: null, wRows: [], zeroed: false, curveFit: false, respFit: false, exported: false, pendingFit: null, open: null, busy: false };
 function isSimLike() { return S.mode === 'sim' || S.srvMode === 'sim'; }
 function fanSet(on) {
-  if (S.mode === 'sim') { sim.fanOff = !on; if (on && $('simProfile').value === 'mixed') { $('simProfile').value = 'steps'; } }
+  if (S.mode === 'sim') { sim.fanOff = !on; if (on && $('simProfile').value === 'mixed') $('simProfile').value = 'steps'; }
   else if (S.srvMode === 'sim') send({ type: 'sim', fan: on ? 'on' : 'off', ...(on ? { profile: 'steps' } : {}) });
   else { log(on ? 'Turn the tunnel fan on and step it through 2 → 10 m/s' : 'Turn the tunnel fan off', 'w'); return; }
   log(on ? 'Fan on: stepping 2 → 10 m/s' : 'Fan off', 'ok');
@@ -1497,17 +1471,11 @@ const STEP_DEFS = {
   sweep: { t: 'Sweep the fan 2 → 10 m/s', why: 'Hold each speed for a few seconds so every 1 m/s band has data. The fit needs the whole range.',
     st: () => { const c = covered(); return c >= 8 ? ['done', `${c}/9 bands`] : ['todo', `${c}/9 bands`]; },
     body: () => `${coverageHtml()}<div class="row"><button class="btn sm" data-a="fanon">Fan on (steps)</button></div><p class="hint">Green bands have at least 3 s of data. The buffer keeps the last ${MAX_S} s.</p>` },
-  curve: { t: () => S.model === 'sqrt' ? 'Fit drag area Cd·A and F₀' : 'Fit air per rev and start-up speed', why: () => S.model === 'sqrt' ? 'Finds the Cd·A that makes √(2F/(ρ·Cd·A)) match the pitot across the sweep.' : 'Finds the straight line from spin rate to wind speed that matches the pitot.',
-    st: () => ST.curveFit ? ['done', S.model === 'sqrt' ? `Cd·A ${(2e4 / S.params.sqrt.sqrt_k).toFixed(1)} cm²` : `${S.params.rotor.rotor_slope.toFixed(4)} m/rev`] : covered() < 6 ? ['warn', 'sweep first'] : ['todo', ''],
-    body: () => `<div class="row"><button class="btn sm primary" data-a="fitcurve">Fit curve (60 s)</button></div>${S.model === 'sqrt' ? '<p class="hint">Check the implied Cd under the formula in Tune: a flat plate should land near 1.1–1.3.</p>' : ''}` },
-  stall: { t: 'Set the stall cut-off', why: 'Below some wind the cups stop or creep. Readings under the cut-off report 0 m/s instead of a wrong small speed.',
-    st: () => ST.stallSet ? ['done', `${S.params.rotor.rotor_min_hz} rev/s`] : ['todo', ''],
-    body: () => `<div class="row"><button class="btn sm" data-a="stall">Suggest from data</button></div><p class="hint">Uses the slowest steady spin rate seen so far. Run the fan down slowly first for a better estimate.</p>` },
-  window: { t: 'Choose the rate averaging window', why: 'The board counts pulses over this window. Short: fast but jittery. Long: smooth but delayed. Try each and watch the Score tile.',
-    st: () => ST.windowTried ? ['done', `${S.board.rotor.rotor_window_ms} ms`] : ['todo', `${S.board.rotor.rotor_window_ms} ms`],
-    body: () => `<div class="row">${[25, 50, 100, 150].map(v => `<button class="btn sm${S.board.rotor.rotor_window_ms === v ? ' primary' : ''}" data-a="win" data-v="${v}">${v} ms</button>`).join('')}</div><p class="hint">Each choice is pushed to the board and starts a new segment if you are recording.</p>` },
-  response: { t: 'Fit smoothing α and lag compensation', why: 'On speed steps, trades noise against lag to minimise MSE. This is the step that wins or loses the ranking.',
-    st: () => ST.respFit ? ['done', `α ${S.params[S.model].ema_alpha}`] : ['todo', ''],
+  curve: { t: 'Fit drag area Cd·A and F₀', why: 'Finds the Cd·A and F₀ that make √(2(F − F₀)/(ρ·Cd·A)) match the pitot across the sweep.',
+    st: () => ST.curveFit ? ['done', `Cd·A ${(2e4 / S.params.sqrt.sqrt_k).toFixed(1)} cm²`] : covered() < 6 ? ['warn', 'sweep first'] : ['todo', ''],
+    body: () => `<div class="row"><button class="btn sm primary" data-a="fitcurve">Fit curve (60 s)</button></div><p class="hint">Check the implied Cd under the formula in Tune: a flat plate should land near 1.1–1.3.</p>` },
+  response: { t: 'Fit smoothing and lag compensation', why: 'On speed steps, trades noise against lag to minimise MSE. This is the step that wins or loses the ranking.',
+    st: () => ST.respFit ? ['done', S.params.sqrt.filter_kind >= 0.5 ? `α ${S.params.sqrt.ema_alpha}` : `${S.params.sqrt.lpf_hz} Hz`] : ['todo', ''],
     body: () => `<div class="row"><button class="btn sm" data-a="fanon">Fan on (steps)</button><button class="btn sm primary" data-a="fitresp">Fit response (60 s)</button></div>` },
   push: { t: 'Push to the sensor and verify', why: 'Sends the settings, then checks that the board output scores like the PC preview.',
     st: () => { const r = pushedOk(); return r.ok ? ['done', `board ${devMet.mse.toFixed(4)}`] : r.dirty.length ? ['todo', `${r.dirty.length} unpushed`] : ['warn', devMet && curMet ? `board ${devMet.mse.toFixed(3)} vs ${curMet.mse.toFixed(3)}` : '']; },
@@ -1516,7 +1484,7 @@ const STEP_DEFS = {
     st: () => ST.exported ? ['done', 'exported'] : ['todo', ''],
     body: () => `<div class="row"><button class="btn sm primary" data-a="export">Export / install</button><button class="btn sm" data-a="verify">Record 60 s run</button></div>` },
 };
-const STEP_ORDER = { sqrt: ['connect', 'tare', 'weights', 'zero', 'sweep', 'curve', 'response', 'push', 'save'], rotor: ['connect', 'sweep', 'curve', 'stall', 'window', 'response', 'push', 'save'] };
+const STEP_ORDER = { sqrt: ['connect', 'tare', 'weights', 'zero', 'sweep', 'curve', 'response', 'push', 'save'] };
 const val = x => typeof x === 'function' ? x() : x;
 function renderSteps(full) {
   if (!$('steps')) return;
@@ -1537,7 +1505,7 @@ function renderSteps(full) {
   }
 }
 // re-render a step body only when its content inputs change, so typing in it isn't interrupted
-function bodyKey(id) { return id === 'sweep' ? coverage().map(s => s >= 3 ? 2 : s > 0.5 ? 1 : 0).join('') : id === 'weights' ? ST.wRows.length + ':' + !!ST.wRes + ':' + isSimLike() : id === 'window' ? S.board.rotor.rotor_window_ms : S.model + S.params[S.model].filter_kind; }
+function bodyKey(id) { return id === 'sweep' ? coverage().map(s => s >= 3 ? 2 : s > 0.5 ? 1 : 0).join('') : id === 'weights' ? ST.wRows.length + ':' + !!ST.wRes + ':' + isSimLike() : S.model + S.params[S.model].filter_kind; }
 setInterval(() => { if (!$('tab-steps').hidden) renderSteps(); }, 1000);
 async function stepMeasure(btn, sec, fn) {
   if (ST.busy) return; ST.busy = true; const t = btn.textContent; btn.disabled = true; btn.textContent = 'Measuring…';
@@ -1567,13 +1535,6 @@ function wireStep(root) {
       document.querySelectorAll('#freeChips input').forEach(i => i.checked = want.has(i.dataset.p));
       $('fitWin').value = '60'; $('btnFit').click();
     }
-    else if (a === 'stall') {
-      const f = featureArr(), v = []; for (let i = 0; i < B.t.length; i++) if (f[i] > 0.2 && B.gt[i] < 3.5) v.push(f[i]);
-      if (v.length < FS) { log('Not enough slow-speed data: run the fan down below ~3 m/s first', 'w'); return; }
-      v.sort((x, y) => x - y); const sug = +(0.85 * v[Math.floor(v.length * 0.02)]).toFixed(2);
-      setParam(specOf('rotor', 'rotor_min_hz'), sug, true); buildParams(); ST.stallSet = true; log(`Stall cut-off set to ${sug} rev/s`, 'ok'); renderSteps(true);
-    }
-    else if (a === 'win') { const v = +b.dataset.v; S.params.rotor.rotor_window_ms = v; pushParams(['rotor_window_ms']); ST.windowTried = true; log(`Rate window ${v} ms pushed`); renderSteps(true); }
     else if (a === 'push') pushParams();
     else if (a === 'scoreboard') document.querySelector('#scoreSeg [data-v=dev]').click();
     else if (a === 'export') showExport();
@@ -1589,11 +1550,11 @@ $('btnPorts').onclick = () => send({ type: 'ports' });
 $('btnRuns').onclick = () => send({ type: 'list_runs' });
 $('btnConnect').onclick = () => {
   if (!$('selPort').value) { $('srcStatus').textContent = 'Pick the Nucleo port first'; return; }
-  send({ type: 'connect', source: 'serial', sensor_port: $('selPort').value, baud: +$('selBaud').value, gt_kind: $('selGtKind').value, gt_value: $('gtValue').value.trim() || undefined, model: S.model });
+  send({ type: 'connect', source: 'serial', sensor_port: $('selPort').value, baud: +$('selBaud').value, gt_kind: $('selGtKind').value, gt_value: $('gtValue').value.trim() || undefined, gt_pressure: $('gtPressure').checked });
   $('srcStatus').textContent = 'Connecting…';
 };
-$('btnUseSim').onclick = () => { send({ type: 'connect', source: 'sim', model: S.model }); $('srcStatus').textContent = 'Switching to the simulator…'; };
-$('btnReplay').onclick = () => { const r = $('selRun').value; if (r) { send({ type: 'connect', source: 'replay', replay_file: r, model: S.model }); $('srcStatus').textContent = 'Loading replay…'; } };
+$('btnUseSim').onclick = () => { send({ type: 'connect', source: 'sim' }); $('srcStatus').textContent = 'Switching to the simulator…'; };
+$('btnReplay').onclick = () => { const r = $('selRun').value; if (r) { send({ type: 'connect', source: 'replay', replay_file: r }); $('srcStatus').textContent = 'Loading replay…'; } };
 $('btnRunSummary').onclick = () => { const r = $('selRun').value; if (r) send({ type: 'run_summary', name: r }); };
 function renderRuns(runs) {
   $('selRun').innerHTML = runs.length ? runs.map(r => `<option value="${esc(r.name)}">${esc(r.name)}${r.duration_s ? ` · ${Math.round(r.duration_s)} s` : ''}${Number.isFinite(r.best_mse_pc) ? ` · best ${r.best_mse_pc.toFixed(3)}` : ''}</option>`).join('') : '<option value="">No recordings yet</option>';
@@ -1606,6 +1567,99 @@ function renderRunSummary(m) {
   }).join('')}</tbody></table>`;
 }
 function esc(x) { return String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ---------- Diagnosis: what to change when the plate disagrees with the pitot ----------
+   Same rule ids as calib/metrics.py diagnose(). Static checks use only steady samples (GT not
+   changing), so lag on speed changes is not mistaken for a calibration error. */
+function diagnose() {
+  const [i0, i1] = scoreIdx(), n = i1 - i0; if (n < FS * 8) return [];
+  const p = S.params.sqrt, f = featureArr(), cda = 2 / p.sqrt_k, out = [];
+  const g = B.gt.slice(i0, i1), e = B.est.slice(i0, i1), x = f.slice(i0, i1), r = B.rho.slice(i0, i1).map(v => v > 0 ? v : p.rho_ref);
+  const W = 50, gs = new Float64Array(n); let acc = 0, cnt = 0;   // 0.25 s centred boxcar of GT
+  for (let i = 0; i < n + W / 2; i++) { if (i < n && Number.isFinite(g[i])) { acc += g[i]; cnt++; } const j = i - W; if (j >= 0 && Number.isFinite(g[j])) { acc -= g[j]; cnt--; } const c = i - W / 2; if (c >= 0 && c < n) gs[c] = cnt ? acc / cnt : NaN; }
+  const steady = new Uint8Array(n);
+  for (let i = 10; i < n - 10; i++) steady[i] = Math.abs(gs[i + 10] - gs[i - 10]) / (20 * DT) < 0.3 && g[i] > 1 && Number.isFinite(e[i]) && Number.isFinite(x[i]) ? 1 : 0;
+  const idx = cond => { const o = []; for (let i = 0; i < n; i++) if (steady[i] && cond(i)) o.push(i); return o; };
+  const mean = (ix, fn) => ix.reduce((a, i) => a + fn(i), 0) / (ix.length || 1);
+  const st = idx(() => true); if (st.length < FS * 3) return [{ id: 'need_data', severity: 'info', title: 'Hold steady speeds', why: 'Under 3 s of steady data in the window, so the curve cannot be checked.', action: 'Hold the fan at a few speeds for 5 s each.' }];
+  const mseNow = mean(st, i => (e[i] - g[i]) ** 2);
+  const push = (o) => out.push(o);
+  // static_refit: F = F0 + CdA·(ρ·gt²/2) on steady samples (closed form, exact for the drag equation)
+  { const X = st.map(i => r[i] * g[i] * g[i] / 2), Y = st.map(i => x[i]), mx = X.reduce((a, b) => a + b) / X.length, my = Y.reduce((a, b) => a + b) / Y.length;
+    const sxx = X.reduce((a, v) => a + (v - mx) ** 2, 0), cdaN = X.reduce((a, v, k) => a + (v - mx) * (Y[k] - my), 0) / (sxx || 1), f0N = my - cdaN * mx;
+    if (cdaN > 0) { const mseN = mean(st, i => (Math.sqrt(Math.max(0, 2 * (x[i] - f0N) / (r[i] * cdaN))) - g[i]) ** 2);
+      if (mseN < 0.9 * mseNow && mseNow - mseN > 0.002) push({ id: 'static_refit', severity: mseNow > 0.05 ? 'high' : 'medium', gain: mseNow - mseN, title: 'Re-fit the calibration curve',
+        why: `Fitting the drag equation to the steady data gives Cd·A ${(cdaN * 1e4).toFixed(1)} cm² and F₀ ${f0N.toFixed(4)} N, cutting steady-state MSE from ${mseNow.toFixed(4)} to ${mseN.toFixed(4)}.`,
+        action: 'Apply both. This is the exact least-squares answer for v = √(2(F − F₀)/(ρ·Cd·A)) on held speeds.', apply: { sqrt_k: +(2 / cdaN).toPrecision(5), sqrt_x0: +f0N.toPrecision(4) } }); } }
+  // scale: reads a fixed % high/low across the range
+  { const hi = idx(i => g[i] > 3); if (hi.length > FS) { const rr = hi.reduce((a, i) => a + e[i] * g[i], 0) / hi.reduce((a, i) => a + g[i] * g[i], 0);
+    if (Math.abs(rr - 1) > 0.02) push({ id: 'scale', severity: Math.abs(rr - 1) > 0.05 ? 'high' : 'medium', gain: mseNow * Math.min(1, Math.abs(rr - 1) * 10), title: `Reads ${Math.abs((rr - 1) * 100).toFixed(1)} % ${rr > 1 ? 'high' : 'low'} at all speeds`,
+      why: 'A constant percentage error means the drag area is off (or the load-cell scale is). Speed scales with 1/√(Cd·A).',
+      action: `${rr > 1 ? 'Increase' : 'Decrease'} Cd·A to ${(2e4 / (p.sqrt_k / rr / rr)).toFixed(1)} cm². If the plate was recently re-mounted, redo the hanging-weights step first.`, apply: { sqrt_k: +(p.sqrt_k / rr / rr).toPrecision(5) } }); } }
+  // low_speed_offset: low speeds off relative to high speeds → F₀ wrong
+  { const lo = idx(i => g[i] > 1.5 && g[i] < 4), hi = idx(i => g[i] > 6);
+    if (lo.length > FS && hi.length > FS) { const d = mean(lo, i => e[i] - g[i]) - mean(hi, i => e[i] - g[i]);
+      if (Math.abs(d) > 0.15) { const dF = mean(lo, i => r[i] * cda * (e[i] * e[i] - g[i] * g[i]) / 2);
+        push({ id: 'low_speed_offset', severity: Math.abs(d) > 0.3 ? 'high' : 'medium', gain: d * d, title: `Low speeds read ${d > 0 ? 'high' : 'low'} by ${Math.abs(d).toFixed(2)} m/s`,
+          why: 'An error that is large at 2–4 m/s and small at high speed is a force offset: under the square root a small ΔF matters most when F is small.',
+          action: `${dF > 0 ? 'Raise' : 'Lower'} the zero-flow force F₀ by ${Math.abs(dF).toFixed(4)} N, or re-measure F₀ with the fan off.`, apply: { sqrt_x0: +(p.sqrt_x0 + dF).toPrecision(4) } }); } } }
+  // dead_zone: reads 0 while the wind blows
+  { let k = 0, m = 0; for (let i = 0; i < n; i++) if (g[i] > 1.5) { m++; if (e[i] === 0) k++; }
+    if (m && k / m > 0.02) push({ id: 'dead_zone', severity: 'high', gain: mseNow, title: `Reads 0 m/s ${(100 * k / m).toFixed(0)} % of the time while the wind blows`,
+      why: 'F − F₀ went negative and was clamped to 0. Either F₀ is set too high or the load cell was tared with the fan running.', action: 'Fan off, TARE, then re-measure F₀ (Steps 2 and 4).' }); }
+  // drift: bias changes over the window
+  { const t3 = Math.floor(st.length / 3); if (t3 > FS) { const a = st.slice(0, t3), b = st.slice(-t3), d = mean(b, i => e[i] - g[i]) - mean(a, i => e[i] - g[i]);
+    if (Math.abs(d) > 0.1) push({ id: 'drift', severity: 'medium', gain: d * d / 4, title: `Bias drifted ${d > 0 ? '+' : ''}${d.toFixed(2)} m/s during the window`,
+      why: 'The calibration curve has not changed, so the load-cell zero is creeping (warm-up or temperature).', action: 'Let the board warm up for about 10 minutes, then TARE and re-measure F₀ just before the run.' }); } }
+  // lag / noise / overshoot (dynamics)
+  const lag = curMet ? curMet.lag_ms : NaN, ema = p.filter_kind >= 0.5;
+  const sd = Math.sqrt(Math.max(0, mean(st, i => (e[i] - g[i]) ** 2) - mean(st, i => e[i] - g[i]) ** 2));
+  if (lag > 40) push({ id: 'lag', severity: lag > 100 ? 'high' : 'medium', gain: mseNow * 0.3, title: `Output lags the pitot by ${lag.toFixed(0)} ms`,
+    why: 'On every speed change the reading arrives late, and MSE counts every late sample.', action: ema ? `Raise smoothing α to ${Math.min(1, p.ema_alpha * 1.5).toFixed(3)}, or add lag compensation. Then run "Fit response".` : `Raise the Butterworth cutoff to ${(p.lpf_hz * 1.5).toFixed(1)} Hz, or add lag compensation.`,
+    apply: ema ? { ema_alpha: +Math.min(1, p.ema_alpha * 1.5).toFixed(4) } : { lpf_hz: +(p.lpf_hz * 1.5).toFixed(2) } });
+  else if (sd > 0.12) push({ id: 'noise', severity: 'medium', gain: sd * sd / 2, title: `Noisy at steady speed (σ ${sd.toFixed(2)} m/s)`,
+    why: 'The reading jitters even when the speed is constant, and there is little lag to lose.', action: ema ? `Lower smoothing α to ${(p.ema_alpha * 0.7).toFixed(3)}.` : `Lower the Butterworth cutoff to ${(p.lpf_hz * 0.7).toFixed(1)} Hz.`,
+    apply: ema ? { ema_alpha: +(p.ema_alpha * 0.7).toFixed(4) } : { lpf_hz: +(p.lpf_hz * 0.7).toFixed(2) } });
+  { const os = []; for (let i = 60; i < n - 300; i++) { if (!(Math.abs(gs[i + 40] - gs[i - 40]) > 1)) continue; const g0 = gs[i - 60], g1 = gs[i + 240], dir = Math.sign(g1 - g0);
+      if (Math.abs(g1 - g0) > 1) { let pk = -Infinity; for (let j = i; j < i + 300; j++) if (Number.isFinite(e[j])) pk = Math.max(pk, dir * (e[j] - g1)); os.push(pk / Math.abs(g1 - g0)); } i += 400; }
+    os.sort((a, b) => a - b); const med = os.length ? os[Math.floor(os.length / 2)] : NaN;
+    if (med > 0.08) push({ id: 'overshoot', severity: 'medium', gain: mseNow * 0.2, title: `Overshoots steps by ${(med * 100).toFixed(0)} %`,
+      why: 'After a speed change the reading swings past the new value: too much lag compensation, or the plate ringing on its mount.', action: p.lead_tau > 0 ? `Halve lag compensation to ${(p.lead_tau / 2).toFixed(3)} s, or switch to the Butterworth filter to damp the ringing.` : 'Switch to the Butterworth filter with a cutoff below the ringing frequency, or stiffen the plate mount.',
+      apply: p.lead_tau > 0 ? { lead_tau: +(p.lead_tau / 2).toFixed(4) } : null }); }
+  // nonlinear: bias differs between speed bands even after the best curve
+  { const bands = [[2, 4], [4, 6], [6, 8], [8, 11]].map(([a, b]) => idx(i => g[i] >= a && g[i] < b)).filter(ix => ix.length > FS);
+    if (bands.length >= 3) { const bs = bands.map(ix => mean(ix, i => e[i] - g[i])), spread = Math.max(...bs) - Math.min(...bs);
+      if (spread > 0.2 && !out.some(o => o.id === 'static_refit' || o.id === 'low_speed_offset')) push({ id: 'nonlinear', severity: 'info', gain: spread * spread / 8, title: `Error changes with speed (${spread.toFixed(2)} m/s spread) after the best curve`,
+        why: 'The plate\'s Cd varies with Reynolds number, so one Cd·A cannot fit every speed exactly.', action: 'Fit over the speeds the test will use (2–10 m/s, steady holds). A sharp-edged flat plate keeps Cd most constant.' }); } }
+  // rho sanity
+  { const rs = r.filter(Number.isFinite).sort((a, b) => a - b), rm = rs[Math.floor(rs.length / 2)];
+    if (rm < 1.10 || rm > 1.30) push({ id: 'rho', severity: 'high', gain: mseNow, title: `Air density ${rm.toFixed(3)} kg/m³ looks wrong`,
+      why: 'ρ = P/(287.05·T) feeds straight into the speed. A room is about 1.15–1.25 kg/m³.', action: 'Check the baro reads Pa (≈101 000) and the temperature reads °C, using ENV in the Board commands.' }); }
+  // GT noise at low speed
+  { const lo = idx(i => g[i] < 3); if (lo.length > FS) { const s2 = Math.sqrt(mean(lo, i => (g[i] - gs[i]) ** 2));
+    if (s2 > 0.15) push({ id: 'gt_noise', severity: 'info', gain: 0, title: `Pitot is noisy below 3 m/s (σ ${s2.toFixed(2)} m/s)`,
+      why: 'The pitot pressure is only a few pascals at low speed, so the ground truth itself jitters.', action: 'Use the Robust fit method and hold low speeds longer. Do not chase this noise with the calibration.' }); } }
+  const rank = { high: 0, medium: 1, info: 2 };
+  return out.sort((a, b) => rank[a.severity] - rank[b.severity] || (b.gain || 0) - (a.gain || 0));
+}
+let DIAG = [];
+function renderDiag() {
+  DIAG = (S.mode === 'live' && Array.isArray(S.serverDiag)) ? S.serverDiag : diagnose();
+  const hi = DIAG.filter(d => d.severity === 'high').length;
+  $('fixBadge').hidden = !hi;
+  if ($('tab-fit').hidden) return;
+  $('diag').innerHTML = DIAG.length ? DIAG.map((d, k) => `<div class="dg ${d.severity}">
+      <div class="dgT"><span class="state ${d.severity === 'high' ? 'bad' : d.severity === 'medium' ? 'warn' : ''}"></span>${esc(d.title)}</div>
+      <div class="hint">${esc(d.why)}</div><div class="dgA">${esc(d.action)}</div>
+      ${d.apply ? `<div class="row"><button class="btn sm primary" data-dg="${k}">Apply: ${Object.entries(d.apply).map(([k2, v]) => `${esc(labelOf(k2))} → ${esc(dispVal(k2, v, true))}`).join(', ')}</button></div>` : ''}</div>`).join('')
+    : '<p class="hint delta-good">No problems found in the scoring window. Keep the fan steps going to check again.</p>';
+  $('diag').querySelectorAll('[data-dg]').forEach(b => b.onclick = () => {
+    const d = DIAG[+b.dataset.dg]; if (!d?.apply) return;
+    for (const [k2, v] of Object.entries(d.apply)) { const sp = specOf('sqrt', k2); if (sp) { sp.min = Math.min(sp.min, v); sp.max = Math.max(sp.max, v); S.params.sqrt[k2] = v; } }
+    sendParams(d.apply); buildParams(); markParamsChanged('advice'); maybeAutoPush(Object.keys(d.apply)); recMark('advice', d.id); log(`Applied advice: ${d.title}`, 'ok'); renderDiag();
+  });
+}
+setInterval(renderDiag, 2000);
 
 /* ---------- Live link to python -m calib serve ---------- */
 function send(msg) { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(msg)); }
@@ -1629,7 +1683,7 @@ function setMode(mode, txt) {
 function onServer(m) {
   if (m.type === 'hello') {
     setMode(m.mode === 'sim' ? 'pysim' : m.mode);
-    S.srvMode = m.mode; $('srcNoServer').hidden = true; $('srcServer').hidden = false;
+    S.srvMode = m.mode; $('srcNoServer').hidden = true; $('srcServer').hidden = false; $('gtPressure').checked = !!m.gt_pressure;
     $('srcStatus').textContent = m.mode === 'live' ? `Live: ${m.sources?.sensor || ''}` : m.mode === 'replay' ? 'Replaying a recording' : 'Server simulator';
     send({ type: 'ports' }); send({ type: 'list_runs' });
     if (m.models) for (const [id, def] of Object.entries(m.models)) {
@@ -1637,15 +1691,15 @@ function onServer(m) {
       for (const sp of def.params || []) { const own = specOf(id, sp.name); if (own && sp.step) own.step = sp.step; }
     }
     if (m.model && MODELS[m.model]) S.model = m.model;
-    if (m.params) { Object.assign(S.params[S.model], m.params); Object.assign(S.board[S.model], m.params); S.params[S.model].filter_kind = 1; widenRanges(S.model); }
+    if (m.params) { Object.assign(S.params[S.model], m.params); Object.assign(S.board[S.model], m.params); widenRanges(S.model); }
     syncBoard(m.board);
     S.serverMethod = m.method ? methodMacro(m.method) : (m.telemetry?.method ? methodMacro(m.telemetry.method) : null);
-    buildModelSeg(); buildParams(); buildFree(); log(`Server: ${m.mode} mode, sensor ${MODELS[S.model].label}`, 'ok');
+    buildParams(); buildFree(); log(`Server: ${m.mode} mode, sensor ${MODELS[S.model].label}`, 'ok');
   } else if (m.type === 'frame') {
     if (S.paused) return;
     if (m.replace) { for (const k of BKEYS) B[k].length = 0; estDirty = true; }
     const n = m.t.length, start = B.t.length, raw = m.raw || {};
-    const fr = raw.feature ?? (S.model === 'rotor' ? raw.feature_rotor : raw.feature_sqrt);
+    const fr = raw.feature ?? raw.feature_sqrt;
     for (let i = 0; i < n; i++) {
       B.t.push(m.t[i]); B.gt.push(num(m.gt?.[i])); B.dev.push(num(m.dev?.[i]));
       B.feature.push(num(fr?.[i])); B.rho.push(num(raw.rho?.[i])); B.temp_c.push(num(raw.temp_c?.[i])); B.pressure_pa.push(num(raw.pressure_pa?.[i]));
@@ -1657,10 +1711,9 @@ function onServer(m) {
     trimBuf();
     if (m.telemetry) { S.serverTele = m.telemetry; if (m.telemetry.method) S.serverMethod = methodMacro(m.telemetry.method); }
   } else if (m.type === 'params') {
-    if (m.model && MODELS[m.model] && m.model !== S.model) { S.model = m.model; buildModelSeg(); buildFree(); }
+    if (m.model && MODELS[m.model] && m.model !== S.model) { S.model = m.model; buildFree(); }
     if (m.params) Object.assign(S.params[S.model], m.params);
     syncBoard(m.board);
-    S.params[S.model].filter_kind = 1;   // the team's design is the EMA; a push switches a board still on its Butterworth default
     widenRanges(S.model); buildParams(); markParamsChanged('server'); recMark('board', 'settings from server');
   } else if (m.type === 'fit_result') {
     if (!m.ok) { ST.pendingFit = null; setFitStatus(m.message || 'Fit failed', 'e'); log('Fit failed: ' + (m.message || ''), 'e'); return; }
@@ -1673,6 +1726,7 @@ function onServer(m) {
     if (m.gt?.kind && GT_HINT[m.gt.kind]) { $('selGtKind').value = m.gt.kind; $('selGtKind').onchange(); if (m.gt.value) $('gtValue').value = m.gt.value; }
   }
   else if (m.type === 'runs') renderRuns(m.runs || []);
+  else if (m.type === 'metrics') { S.serverDiag = m.diagnosis || null; }
   else if (m.type === 'run_summary') renderRunSummary(m);
   else if (m.type === 'exported') { log(`Wrote ${(m.files || []).length} files${m.installed ? ', installed into firmware/include' : ''}`, 'ok'); ST.exported = true; renderSteps(); }
   else if (m.type === 'log') log(m.msg, m.level === 'error' ? 'e' : m.level === 'warning' ? 'w' : m.level === 'ok' ? 'ok' : '');
@@ -1695,7 +1749,7 @@ function log(msg, cls = '') { const d = document.createElement('div'); d.classNa
 readColors();
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => setTimeout(readColors, 0));
 new MutationObserver(() => setTimeout(readColors, 0)).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-buildModelSeg(); buildParams(); buildFree(); buildTiles(); renderTruth(); renderCardText(); renderRec(); renderSteps(true);
+buildParams(); buildFree(); buildTiles(); renderTruth(); renderCardText(); renderRec(); renderSteps(true);
 setMode('sim');
 // warm start: 25 s of simulated history so the page opens in a working state
 for (let k = 0; k < 25 * FS; k++) simPush(sim.step(S.board));

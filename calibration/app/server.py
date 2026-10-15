@@ -32,7 +32,7 @@ from calib.sources import (PROFILES, CSVReplaySource, GroundTruthSource, SerialS
 
 STATIC = Path(__file__).resolve().parent / "static"
 FRAME_HZ, METRICS_HZ = 20.0, 2.0
-RAW_SEND = ("feature", "rho", "temp_c", "pressure_pa", "feature_rotor", "feature_sqrt")
+RAW_SEND = ("feature", "rho", "temp_c", "pressure_pa")
 REPLACE_WINDOW_S, REPLACE_DECIM = 60.0, 1  # full rate so the dashboard can re-run the exact 200 Hz chain
 
 
@@ -88,15 +88,15 @@ def _jsonable(o):
 
 
 class Engine:
-    def __init__(self, mode: str, model: str = "rotor", window_s: float = 30.0, buffer_s: float = 120.0,
+    def __init__(self, mode: str, window_s: float = 30.0, buffer_s: float = 120.0,
                  sensor_port: str | None = None, baud: int = 115200, gt_cmd=None, gt_module=None, gt_port=None,
-                 gt_baud: int = 115200, replay: str | None = None, replay_speed: float = 1.0,
-                 profile: str = "steps", seed: int | None = None):
-        self.mode, self.model, self.window_s = mode, model, window_s
+                 gt_baud: int = 115200, gt_pressure: bool = False, replay: str | None = None,
+                 replay_speed: float = 1.0, profile: str = "steps", seed: int | None = None):
+        self.mode, self.window_s = mode, window_s
         self.lock = threading.Lock()
         self.sensor = Ring(int(buffer_s * 200))
         self.gt = Ring(int(buffer_s * 250))
-        self.params_by_model = {m: models.default_params(m) for m in models.MODELS}
+        self.params = models.default_params()
         self.board_cal: dict = {}
         self.info: deque = deque(maxlen=500)
         self.recorder: Session | None = None
@@ -120,8 +120,8 @@ class Engine:
             if val:
                 gt_kind, gt_value = kind, val
         self._cfg = {"source": source, "sensor_port": sensor_port, "baud": baud, "gt_kind": gt_kind,
-                     "gt_value": gt_value, "gt_baud": gt_baud, "replay_file": replay, "speed": replay_speed,
-                     "model": model, "profile": profile, "seed": seed}
+                     "gt_value": gt_value, "gt_baud": gt_baud, "gt_pressure": gt_pressure, "replay_file": replay,
+                     "speed": replay_speed, "profile": profile, "seed": seed}
         self._install(self._build_sources(self._cfg, validate=False))
 
     # ------------------------------------------------------------------- source construction / switching
@@ -157,15 +157,14 @@ class Engine:
         on_info = lambda line: self._on_info(line, gen)  # noqa: E731
         on_cal = lambda cal: self._on_cal(cal, gen)  # noqa: E731
         src = cfg.get("source", "sim")
-        model = cfg.get("model") if cfg.get("model") in models.MODELS else self.model
-        out = {"gen": gen, "cfg": dict(cfg, model=model), "sim": None, "sensor_src": None, "gt_src": None, "sources": [],
-               "labels": {"sensor": "-", "gt": "-"}, "model": model}
+        out = {"gen": gen, "cfg": dict(cfg), "sim": None, "sensor_src": None, "gt_src": None, "sources": [],
+               "labels": {"sensor": "-", "gt": "-"}}
         if src == "sim":
             profile = cfg.get("profile") or "steps"
             if profile not in PROFILES:
                 raise ValueError(f"unknown profile {profile!r}; choose from {', '.join(PROFILES)}")
             seed = cfg.get("seed")
-            sim = SimulatedTunnel(model=model, profile=profile, seed=int(time.time()) if seed is None else int(seed))
+            sim = SimulatedTunnel(profile=profile, seed=int(time.time()) if seed is None else int(seed))
             s_ = SimSource(sim, on_sensor, on_gt, on_info)
             out.update(mode="sim", sim=sim, sensor_src=s_, gt_src=s_, sources=[s_],
                        labels={"sensor": "simulator", "gt": "simulator"})
@@ -240,7 +239,6 @@ class Engine:
             self.mode, self.sim = built["mode"], built["sim"]
             self.sensor_src, self.gt_src, self.sources = built["sensor_src"], built["gt_src"], built["sources"]
             self._labels, self._cfg = built["labels"], built["cfg"]
-            self.model = built["model"]
             self.board_cal = {}
             self._dyn, self._rec_dyn = models.DynState(), models.DynState()
             self._sent_seq = self._est_seq = self._rec_seq = 0
@@ -311,8 +309,12 @@ class Engine:
 
     def _on_gt(self, t, v, gen=None):
         with self.lock:
-            if gen is None or gen == self._gen:
-                self.gt.append(t, {"gt": v})
+            if gen is not None and gen != self._gen:
+                return
+            if self._cfg.get("gt_pressure"):  # GT script prints pitot dynamic pressure (Pa): v = √(2·dp/ρ)
+                rho = self.sensor.cols.get("rho", [])
+                v = float(models.pitot_speed(v, rho[-1] if rho and rho[-1] > 0.5 else models.RHO_REF))
+            self.gt.append(t, {"gt": v})
 
     def _on_info(self, line: str, gen=None):
         if gen is not None and gen != self._gen:
@@ -325,20 +327,19 @@ class Engine:
                 pass
 
     def _on_cal(self, cal: dict, gen=None):
-        """Board's GET reply. Board-side settings (tare, load-cell scale, rate window) are mirrored
-        into the PC params so the preview and exports describe what the board is really doing."""
+        """Board's GET reply. Board-side settings (tare, load-cell scale) are mirrored into the PC params
+        so the preview and exports describe what the board is really doing."""
         if gen is not None and gen != self._gen:
             return
         self.board_cal = cal
-        before = (self.model, dict(self.params))
-        for model_id, params in self.params_by_model.items():
-            for spec in models.MODELS[model_id].params:
-                if spec.group == "board" and isinstance(cal.get(spec.name), (int, float)):
-                    params[spec.name] = float(cal[spec.name])
-        entry = models.BOARD_METHODS.get(str(cal.get("method", "")).lower())
-        if entry and entry[1] != self.model and self.mode == "live":
-            self.info.append(f"#info board runs {cal['method']}: switching model to {entry[1]}")
-            self.set_model(entry[1])
+        before = dict(self.params)
+        for spec in models.PARAMS:
+            if spec.group == "board" and isinstance(cal.get(spec.name), (int, float)):
+                self.params[spec.name] = float(cal[spec.name])
+        method = str(cal.get("method", "")).lower()
+        if method and method != models.BOARD_METHOD:
+            self.info.append(f"#err board runs {cal['method']}, not {models.BOARD_METHOD}: "
+                             "flash the airspeed_drag_plate build")
         self._mark("board", before, detail="board #cal sync")
         if not self.info or not self.info[-1].startswith("#cal"):
             self.info.append("#cal " + json.dumps(cal))
@@ -355,49 +356,30 @@ class Engine:
             self.recorder.close()
 
     # ------------------------------------------------------------------------------------ params
-    @property
-    def params(self) -> dict:
-        return self.params_by_model[self.model]
-
-    def _mark(self, kind: str, before: tuple, detail=None):
-        """Tell the recording session that params/model may have changed (opens a new pset if so)."""
-        rec = self.recorder
-        if rec and (before[0] != self.model or before[1] != self.params):
-            rec.change(self.model, self.params, kind=kind, detail=detail)
+    def _mark(self, kind: str, before: dict, detail=None):
+        """Tell the recording session that params may have changed (opens a new pset if so)."""
+        if self.recorder and before != self.params:
+            self.recorder.change(self.params, kind=kind, detail=detail)
 
     def set_params(self, values: dict, kind: str = "param", detail=None) -> list[str]:
         """Several params as one change (one pset)."""
-        before = (self.model, dict(self.params))
+        before = dict(self.params)
         errs = [e for k, v in values.items() if (e := self.set_param(k, float(v), mark=False))]
         self._mark(kind, before, detail)
         return errs
 
     def set_param(self, name: str, value: float, mark: bool = True) -> str | None:
-        b = models.bounds(self.model)
+        b = models.bounds()
         if name not in b:
-            return f"unknown parameter {name!r} for model {self.model}"
+            return f"unknown parameter {name!r}"
         lo, hi = b[name]
-        before = (self.model, dict(self.params))
+        before = dict(self.params)
         self.params[name] = float(min(max(value, lo), hi))
         self._replace_pending = True
         if mark:
             self._mark("param", before)
         if self.auto_push and name in models.FIRMWARE_PARAMS:
             self.command(f"SET {name} {self.params[name]:.9g}")
-        return None
-
-    def set_model(self, model: str) -> str | None:
-        if model not in models.MODELS:
-            return f"unknown model {model!r}"
-        before = (self.model, dict(self.params))
-        self.model = model
-        self._rec_dyn = models.DynState()
-        if self.sim:
-            with self.sensor_src.lock:
-                self.sim.model = model
-                self.sim.board_state = models.DynState()
-        self._replace_pending = True
-        self._mark("model", before)
         return None
 
     def command(self, line: str, log_event: bool = True) -> bool:
@@ -417,15 +399,12 @@ class Engine:
         return ok
 
     def push_params(self) -> int:
-        lines = export.push_lines(self.model, self.params)
+        lines = export.push_lines(self.params)
         if self.recorder:
-            self.recorder.event("push", detail={"model": self.model, "lines": lines})
+            self.recorder.event("push", detail={"lines": lines})
         for ln in lines:
             self.command(ln, log_event=False)
         self.command("GET", log_event=False)
-        if self.params.get("filter_kind") != float(models.FILTER_EMA):
-            # the push switched the board to the EMA smoother: preview the same chain from now on
-            self.set_params({"filter_kind": float(models.FILTER_EMA)}, kind="push", detail="board now on EMA")
         return len(lines)
 
     # ----------------------------------------------------------------------------------- preview
@@ -438,12 +417,12 @@ class Engine:
 
     def _compute_est(self, raw: dict, state: models.DynState) -> np.ndarray | None:
         try:
-            return models.apply(self.model, self.params, raw, state=state)
+            return models.apply(self.params, raw, state=state)
         except KeyError:
             return None  # no feature column (velocity-only stream)
 
     def build_frame(self) -> dict | None:
-        """New rows since the last frame, or a full replacement after a param/model change."""
+        """New rows since the last frame, or a full replacement after a param change."""
         replace = self._replace_pending
         with self.lock:
             if replace:
@@ -525,7 +504,7 @@ class Engine:
             "sensor_connected": bool(getattr(self.sensor_src, "connected", False)),
             "gt_connected": bool(getattr(self.gt_src, "connected", False)),
             "recording": rec.path.name if rec else None,
-            "method": self.board_cal.get("method") or (self.sim.method if self.sim else None),
+            "method": self._method(),
             "profile": self.sim.profile if self.sim else None,
             "auto_push": self.auto_push,
             "board": self.board_cal,
@@ -537,10 +516,10 @@ class Engine:
             return None
         gt = run.gt_on_sensor()
         est = self._compute_est(run.sensor, models.DynState())
-        out = {"type": "metrics", "window_s": self.window_s, "est": None, "dev": None}
+        out = {"type": "metrics", "window_s": self.window_s, "est": None, "dev": None, "diagnosis": []}
         if est is not None:
-            m = metrics.compute(est, gt)
-            out["est"] = m
+            out["est"] = metrics.compute(est, gt)
+            out["diagnosis"] = metrics.diagnose(est, gt, run.sensor.get("feature"), run.sensor.get("rho"), self.params)
         if "v" in run.sensor:
             out["dev"] = metrics.compute(run.sensor["v"], gt)
         return _jsonable(out)
@@ -548,14 +527,13 @@ class Engine:
     def run_fit(self, method: str, window_s: float | None, free) -> dict:
         run = self._snapshot_run(window_s or self.window_s)
         prev = dict(self.params)
-        model = self.model
-        r = fit.fit_run(model, prev, run, fit.normalize_method(method, free), free or None)
-        if r.ok and model == self.model:
-            before = (self.model, dict(self.params))
+        r = fit.fit_run(prev, run, method, free or None)
+        if r.ok:
+            before = dict(self.params)
             self.params.update(r.params)
             self._replace_pending = True
-            self._mark("fit", before, detail={"method": r.method if hasattr(r, "method") else method,
-                                              "mse_before": r.before.get("mse"), "mse_after": r.after.get("mse")})
+            self._mark("fit", before, detail={"method": r.method, "mse_before": r.before.get("mse"),
+                                              "mse_after": r.after.get("mse")})
             self.last_fit = r.to_dict()
             if self.auto_push:
                 self.push_params()
@@ -564,36 +542,39 @@ class Engine:
         return _jsonable(d)
 
     def params_msg(self) -> dict:
-        """PC params for the current model, plus what the board last reported via GET (its live values)."""
-        return _jsonable({"type": "params", "model": self.model, "params": self.params,
+        """PC params, plus what the board last reported via GET (its live values)."""
+        return _jsonable({"type": "params", "model": models.MODEL_ID, "params": self.params,
                           "board": {k: v for k, v in self.board_cal.items() if k in models.FIRMWARE_PARAMS}})
 
     def hello(self) -> dict:
         with self.lock:
             chans = list(self.sensor.cols)
         return _jsonable({
-            "type": "hello", "mode": self.mode, "model": self.model, "models": models.models_catalog(),
+            "type": "hello", "mode": self.mode, "model": models.MODEL_ID, "models": models.catalog(),
             "params": self.params, "channels": chans,
             "board": {k: v for k, v in self.board_cal.items() if k in models.FIRMWARE_PARAMS}, "window_s": self.window_s,
             "profiles": list(PROFILES) if self.sim else [], "firmware_params": list(models.FIRMWARE_PARAMS),
             "fit_methods": list(fit.METHODS), "telemetry": self.telemetry(),
-            "labels": {mid: m.label for mid, m in models.MODELS.items()},
-            "method": self.board_cal.get("method") or (self.sim.method if self.sim else None),
+            "labels": {models.MODEL_ID: "Drag plate"}, "method": self._method(),
+            "gt_pressure": bool(self._cfg.get("gt_pressure")),
             "source": self._cfg.get("source"), "sources": dict(self._labels),
             "runs_dir": str(recmod.RUNS_DIR),
             "sim": ({"profile": self.sim.profile, "fan": "on" if self.sim.fan_on else "off",
                      "load_g": self.sim.load_n / 9.80665 * 1000.0} if self.sim else None),
         })
 
+    def _method(self) -> str | None:
+        return self.board_cal.get("method") or (self.sim.method if self.sim else None)
+
     def toggle_record(self, on: bool, label: str | None = None) -> str:
         if on and not self.recorder:
-            meta = {"mode": self.mode, "method": self.board_cal.get("method") or (self.sim.method if self.sim else None),
+            meta = {"mode": self.mode, "method": self._method(),
                     "port_sensor": self._labels["sensor"], "port_gt": self._labels["gt"],
                     "profile": self.sim.profile if self.sim else None}
             with self.lock:
                 self._rec_seq = self.sensor.seq_end  # only data from now on
             self._rec_dyn = models.DynState()
-            self.recorder = Session(self.model, self.params, meta, label=label or f"{self.mode}_{self.model}")
+            self.recorder = Session(self.params, meta, label=label or f"{self.mode}_drag_plate")
             return f"recording to {self.recorder.path}"
         if not on and self.recorder:
             self.record_tick()
@@ -631,14 +612,11 @@ class Engine:
         return rec.status() if rec else None
 
     def do_export(self, install: bool = False) -> dict:
-        lf = self.last_fit if self.last_fit and self.last_fit.get("model") == self.model else None
+        lf = self.last_fit
         cur = self.build_metrics() or {}
-        paths = export.write(
-            self.model, self.params,
-            fit_info={k: lf[k] for k in ("method", "free", "n", "message")} if lf else {"method": "manual"},
-            metrics_before=lf["before"] if lf else None, metrics_after=(cur.get("est") or {}),
-            install=install, board_method=self.board_cal.get("method") or (self.sim.method if self.sim else None))
-        return paths
+        return export.write(
+            self.params, fit_info={k: lf[k] for k in ("method", "free", "n", "message")} if lf else {"method": "manual"},
+            metrics_before=lf["before"] if lf else None, metrics_after=(cur.get("est") or {}), install=install)
 
 
 # ============================================================================================ app
@@ -704,16 +682,12 @@ def create_app(engine: Engine) -> FastAPI:
             await broadcast(engine.params_msg() if not err
                             else {"type": "log", "level": "error", "msg": err})
         elif t == "set_params":
-            vals = {k: v for k, v in (msg.get("params") or {}).items() if k in models.bounds(engine.model)}
+            vals = {k: v for k, v in (msg.get("params") or {}).items() if k in models.bounds()}
             engine.set_params(vals)
             await broadcast(engine.params_msg())
         elif t == "reset_params":
-            engine.set_params(models.default_params(engine.model), kind="param", detail="reset to defaults")
+            engine.set_params(models.default_params(), kind="param", detail="reset to defaults")
             await broadcast(engine.params_msg())
-        elif t == "set_model":
-            err = engine.set_model(str(msg.get("model")))
-            await broadcast(engine.params_msg() if not err
-                            else {"type": "log", "level": "error", "msg": err})
         elif t == "set_window":
             engine.window_s = float(min(max(float(msg.get("window_s", 30)), 5), 120))
             await broadcast({"type": "log", "level": "info", "msg": f"metrics window {engine.window_s:g} s"})
@@ -765,7 +739,7 @@ def create_app(engine: Engine) -> FastAPI:
             await ws_send(await loop.run_in_executor(None, engine.ports_info))
         elif t == "connect":
             cfg = {k: msg.get(k) for k in ("source", "sensor_port", "baud", "gt_kind", "gt_value", "gt_baud",
-                                           "replay_file", "speed", "model", "profile", "seed")}
+                                           "gt_pressure", "replay_file", "speed", "profile", "seed")}
             try:
                 msgs, closed = await loop.run_in_executor(None, engine.connect, cfg)
             except ValueError as e:
@@ -849,7 +823,7 @@ def serve(engine: Engine, host: str = "127.0.0.1", port: int = 8765, open_browse
 
     app = create_app(engine)
     url = f"http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}"
-    print(f"calibration dashboard: {url}  (mode={engine.mode}, model={engine.model})")
+    print(f"calibration dashboard: {url}  (mode={engine.mode})")
     if open_browser:
         threading.Timer(1.0, lambda: __import__("webbrowser").open(url)).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")

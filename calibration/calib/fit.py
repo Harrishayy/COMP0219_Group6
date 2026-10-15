@@ -4,10 +4,9 @@ Methods
 - `lsq`         scipy least_squares (TRF, bounded) on est - gt over the chosen free params.
 - `robust_lsq`  same with a soft-L1 loss: residuals beyond ~0.3 m/s count linearly, so gust spikes,
                 GT glitches and the first samples after a step do not drag the static curve.
-- `dynamics`    bounded Nelder-Mead on MSE over the response: EMA weight `ema_alpha` and `lead_tau`
-                (the cost is non-smooth: median filter, clamp). Fitting either sets filter_kind = 1 (EMA),
-                the smoother the team uses; `lpf_hz` and `filter_kind` are never fitted.
-`nelder_mead` is accepted as an alias: `dynamics` if every free param is dynamic, else `robust_lsq`.
+- `dynamics`    bounded Nelder-Mead on MSE over the response: the active smoother's parameter
+                (`ema_alpha` or `lpf_hz`, per `filter_kind`) and `lead_tau`. The cost is non-smooth
+                (median filter, clamp). `filter_kind` itself is never fitted.
 
 All methods run the *full* model (static + filter) so the static fit already accounts for the filter's
 delay, and start from a closed-form linear-regression guess (see `initial_guess`) when that is better
@@ -15,6 +14,7 @@ than the current values, so a bad starting point cannot strand the optimiser.
 """
 from __future__ import annotations
 
+import itertools
 import time
 from dataclasses import dataclass, field
 
@@ -23,26 +23,19 @@ from scipy.optimize import least_squares, minimize
 
 from . import metrics, models
 from .data import Run
+from .metrics import resample
 
 METHODS = ("robust_lsq", "lsq", "dynamics")
-DYNAMIC_PARAMS = ("ema_alpha", "lead_tau")
-NEVER_FIT = {"filter_kind", "lpf_hz"}
 
 
-def normalize_method(method: str | None, free=None) -> str:
-    """Map legacy / unknown names onto METHODS (`nelder_mead` -> dynamics or robust_lsq)."""
-    if method in METHODS:
-        return method
-    if method == "nelder_mead":
-        return "dynamics" if free and set(free) <= set(DYNAMIC_PARAMS) else "robust_lsq"
-    return "robust_lsq"
+def dynamic_params(params: dict) -> tuple[str, str]:
+    return models.smoothing_param(params), "lead_tau"
 
 
 @dataclass
 class FitResult:
     ok: bool
     method: str
-    model: str
     params: dict
     before: dict
     after: dict
@@ -53,55 +46,34 @@ class FitResult:
     cv: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {k: getattr(self, k) for k in ("ok", "method", "model", "params", "before", "after", "free", "n",
-                                              "message", "elapsed_s", "cv")}
+        return {k: getattr(self, k) for k in ("ok", "method", "params", "before", "after", "free", "n", "message",
+                                              "elapsed_s", "cv")}
 
 
 def prepare(run: Run, window_s: float | None = None, lag_s: float = 0.0):
     """Sensor-base arrays for fitting: (raw dict, gt on sensor timestamps)."""
     r = run.window(window_s)
-    t = r.t_s - lag_s
-    from .metrics import resample
-
-    gt = resample(r.t_g, r.gt, t)
-    raw = {k: np.asarray(v, dtype=float) for k, v in r.sensor.items()}
-    return raw, gt
+    gt = resample(r.t_g, r.gt, r.t_s - lag_s)
+    return {k: np.asarray(v, dtype=float) for k, v in r.sensor.items()}, gt
 
 
-def default_free(model_id: str, method: str) -> list[str]:
-    if method == "dynamics":
-        return list(DYNAMIC_PARAMS)
-    return list(models.MODELS[model_id].fit_params)
-
-
-def initial_guess(model_id: str, params: dict, raw: dict, gt) -> dict:
-    """Closed-form static guess from linear regression on settled samples."""
+def initial_guess(params: dict, raw: dict, gt) -> dict:
+    """Closed-form static guess: v²·rho = k·F − k·F0 is linear in F."""
     gt = np.asarray(gt, dtype=float)
-    x = np.asarray(raw[models.feature_channel(model_id, raw)], dtype=float)
+    x = np.asarray(raw["feature"], dtype=float)
     ok = np.isfinite(x) & np.isfinite(gt) & (gt > 1.0)
     if ok.sum() < 20:
         return {}
-    if model_id == "rotor":
-        ok &= x >= params.get("rotor_min_hz", 0.0)
-        if ok.sum() < 20:
-            return {}
-        slope, off = np.polyfit(x[ok], gt[ok], 1)
-        return {"rotor_slope": float(slope), "rotor_offset": float(off)}
-    if model_id == "sqrt":
-        rho = models.density(params, raw, len(x))
-        rho = np.broadcast_to(rho, x.shape)[ok]
-        k, c = np.polyfit(x[ok], gt[ok] ** 2 * rho, 1)  # v² rho = k x - k x0
-        if k <= 0:
-            return {}
-        return {"sqrt_k": float(k), "sqrt_x0": float(-c / k)}
-    return {}
+    rho = models.density(params, raw, len(x))[ok]
+    k, c = np.polyfit(x[ok], gt[ok] ** 2 * rho, 1)
+    return {"sqrt_k": float(k), "sqrt_x0": float(-c / k)} if k > 0 else {}
 
 
-def _residual_fn(model_id, base, free, raw, gt, mask):
+def _residual_fn(base, free, raw, gt, mask):
     def predict(vec):
         p = dict(base)
         p.update(zip(free, vec))
-        return models.apply(model_id, p, raw)
+        return models.apply(p, raw)
 
     def resid(vec):
         r = predict(vec)[mask] - gt[mask]
@@ -115,7 +87,8 @@ def _mse(resid, vec):
     return float(np.mean(r * r))
 
 
-GRID = {"lead_tau": (0.0, 0.03, 0.08, 0.15, 0.25, 0.4), "ema_alpha": (0.02, 0.05, 0.1, 0.2, 0.4, 0.8)}
+GRID = {"lead_tau": (0.0, 0.03, 0.08, 0.15, 0.25, 0.4), "ema_alpha": (0.02, 0.05, 0.1, 0.2, 0.4, 0.8),
+        "lpf_hz": (2.0, 3.5, 5.0, 8.0, 12.0, 20.0)}
 
 
 def _grid_seed(free, x0, lo, hi, resid):
@@ -126,8 +99,6 @@ def _grid_seed(free, x0, lo, hi, resid):
     if not idx:
         return x0
     best, best_cost = np.array(x0, dtype=float), _mse(resid, x0)
-    import itertools
-
     for combo in itertools.product(*(GRID[free[i]] for i in idx)):
         x = np.array(x0, dtype=float)
         for i, v in zip(idx, combo):
@@ -139,22 +110,21 @@ def _grid_seed(free, x0, lo, hi, resid):
     return best
 
 
-def fit_arrays(model_id: str, params: dict, raw: dict, gt, method: str = "robust_lsq", free=None,
+def fit_arrays(params: dict, raw: dict, gt, method: str = "robust_lsq", free=None,
                train_mask=None, f_scale: float = 0.3, max_nfev: int = 400) -> FitResult:
     t0 = time.perf_counter()
-    method = normalize_method(method, free)
     gt = np.asarray(gt, dtype=float)
-    base = models.default_params(model_id)
+    base = models.default_params()
     base.update({k: float(v) for k, v in params.items() if k in base})
-    free = [f for f in (free or default_free(model_id, method)) if f in base and f not in NEVER_FIT]
-    if any(f in DYNAMIC_PARAMS for f in free):
-        base["filter_kind"] = float(models.FILTER_EMA)  # tuning the EMA: run the chain with it
+    if method not in METHODS:
+        return FitResult(False, method, base, {}, {}, [], 0, f"unknown method; use one of {', '.join(METHODS)}")
+    allowed = set(models.STATIC_PARAMS) | set(dynamic_params(base))
+    default = dynamic_params(base) if method == "dynamics" else models.STATIC_PARAMS
+    free = [f for f in (free or default) if f in allowed]
     if not free:
-        return FitResult(False, method, model_id, base, {}, {}, [], 0, "no free parameters")
-    try:
-        models.feature_channel(model_id, raw)
-    except KeyError as e:
-        return FitResult(False, method, model_id, base, {}, {}, free, 0, str(e))
+        return FitResult(False, method, base, {}, {}, [], 0, "no free parameters")
+    if "feature" not in raw:
+        return FitResult(False, method, base, {}, {}, free, 0, "no feature (drag force) column: send MODE D")
     mask = np.isfinite(gt)
     n_skip = int(0.5 * models.FS)  # filter settling at the start of the window
     mask[:n_skip] = False
@@ -162,18 +132,16 @@ def fit_arrays(model_id: str, params: dict, raw: dict, gt, method: str = "robust
         mask &= train_mask
     n = int(mask.sum())
     if n < 200:
-        return FitResult(False, method, model_id, base, {}, {}, free, n,
-                         f"only {n} samples with ground truth; need ≥ 200 (1 s)")
+        return FitResult(False, method, base, {}, {}, free, n, f"only {n} samples with ground truth; need ≥ 200 (1 s)")
 
-    est0 = models.apply(model_id, base, raw)
-    before = metrics.compute(np.where(mask, est0, np.nan), gt)
-    bnd = models.bounds(model_id)
+    before = metrics.compute(np.where(mask, models.apply(base, raw), np.nan), gt)
+    bnd = models.bounds()
     lo = np.array([bnd[f][0] for f in free])
     hi = np.array([bnd[f][1] for f in free])
-    predict, resid = _residual_fn(model_id, base, free, raw, gt, mask)
+    predict, resid = _residual_fn(base, free, raw, gt, mask)
 
     x0 = np.clip([base[f] for f in free], lo, hi)
-    guess = initial_guess(model_id, base, raw, np.where(mask, gt, np.nan))
+    guess = initial_guess(base, raw, np.where(mask, gt, np.nan))
     if guess and any(g in free for g in guess):
         xg = np.clip([guess.get(f, base[f]) for f in free], lo, hi)
         if _mse(resid, xg) < _mse(resid, x0):
@@ -198,28 +166,26 @@ def fit_arrays(model_id: str, params: dict, raw: dict, gt, method: str = "robust
             x = np.clip(x0 + res.x * scale, lo, hi)
             ok, msg = bool(res.success) or res.nfev >= max_nfev * 3, str(res.message)
     except Exception as e:  # numerical trouble: keep the old params
-        return FitResult(False, method, model_id, base, before, before, free, n, f"fit failed: {e!r}",
-                         time.perf_counter() - t0)
+        return FitResult(False, method, base, before, before, free, n, f"fit failed: {e!r}", time.perf_counter() - t0)
 
     new = dict(base)
     new.update({f: float(v) for f, v in zip(free, x)})
     after = metrics.compute(np.where(mask, predict(x), np.nan), gt)
     if after.get("mse", np.inf) > before.get("mse", np.inf):
         # never hand back something worse than what we started with
-        return FitResult(False, method, model_id, base, before, before, free, n,
+        return FitResult(False, method, base, before, before, free, n,
                          "fit did not improve MSE; parameters unchanged", time.perf_counter() - t0)
-    return FitResult(ok or after["mse"] < before["mse"], method, model_id, new, before, after, free, n, msg,
+    return FitResult(ok or after["mse"] < before["mse"], method, new, before, after, free, n, msg,
                      time.perf_counter() - t0)
 
 
-def fit_run(model_id: str, params: dict, run: Run, method: str = "robust_lsq", free=None,
+def fit_run(params: dict, run: Run, method: str = "robust_lsq", free=None,
             window_s: float | None = None, lag_s: float = 0.0, **kw) -> FitResult:
     raw, gt = prepare(run, window_s, lag_s)
-    return fit_arrays(model_id, params, raw, gt, method, free, **kw)
+    return fit_arrays(params, raw, gt, method, free, **kw)
 
 
-def cross_validate(model_id: str, params: dict, raw: dict, gt, method: str = "robust_lsq", free=None,
-                   k: int = 5) -> dict:
+def cross_validate(params: dict, raw: dict, gt, method: str = "robust_lsq", free=None, k: int = 5) -> dict:
     """Blocked k-fold: contiguous time blocks, so neighbouring (correlated) samples never sit on both
     sides of the split. The model always runs over the full series (filter state stays continuous);
     only the residual mask changes. Held-out MSE close to train MSE means the fit generalises."""
@@ -230,8 +196,8 @@ def cross_validate(model_id: str, params: dict, raw: dict, gt, method: str = "ro
     for i in range(k):
         test = np.zeros(n, bool)
         test[edges[i]:edges[i + 1]] = True
-        r = fit_arrays(model_id, params, raw, gt, method, free, train_mask=~test)
-        est = models.apply(model_id, r.params, raw)
+        r = fit_arrays(params, raw, gt, method, free, train_mask=~test)
+        est = models.apply(r.params, raw)
         m = metrics.compute(np.where(test, est, np.nan), gt, with_lag=False)
         folds.append({"fold": i, "train_mse": r.after.get("mse"), "test_mse": m.get("mse"),
                       "params": {f: r.params[f] for f in r.free}})
@@ -240,19 +206,7 @@ def cross_validate(model_id: str, params: dict, raw: dict, gt, method: str = "ro
             "test_mse_std": float(np.nanstd(tm)) if len(tm) else None}
 
 
-def sweep(model_id: str, params: dict, raw: dict, gt, name: str, values) -> list[dict]:
-    """MSE as a function of one parameter (e.g. ema_alpha): for trade-off plots in the report."""
-    out = []
-    for v in values:
-        p = dict(params, **{name: float(v)})
-        m = metrics.compute(models.apply(model_id, p, raw), gt, with_lag=False)
-        out.append({"value": float(v), **m})
-    return out
-
-
 # ---------- load-cell scale from hanging known masses ----------
-# Static load-cell calibration with known masses (SPEC §3).
-# 
 # The board reports force F = (counts - lc_offset) * lc_n_per_count. Hanging masses m_i gives true
 # weights W_i = m_i g. A least-squares line through the origin, F = s W, gives the scale error s, so
 # lc_n_per_count_new = lc_n_per_count_old / s.

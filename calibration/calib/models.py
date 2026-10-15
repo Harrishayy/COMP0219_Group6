@@ -1,9 +1,9 @@
-"""Sensor models: feature -> airspeed, mirroring firmware/lib/airmath exactly (SPEC.md §3).
+"""Drag-plate model: force -> airspeed, mirroring firmware/lib/airmath exactly (SPEC.md §3).
 
-Static maps are `speed_linear` / `speed_sqrt_density` from airspeed_models.cpp; the output chain is
-the one in firmware/src/apps/airspeed.cpp tick(): Median3 -> LeadCompensator -> ButterworthLowPass ->
-clamp at 0 (filters.h / filters.cpp). The firmware computes in float32; we compute in
-float64, which differs by ~1e-6 m/s. The dashboard JS uses the same formulas.
+The static map is `speed_sqrt_density` from airspeed_models.cpp, v = sqrt(k·(F − F0)/rho) with
+k = 2/(Cd·A); the output chain is firmware/src/apps/airspeed.cpp tick(): Median3 -> LeadCompensator ->
+(Ema | ButterworthLowPass) -> clamp at 0. The firmware computes in float32, we in float64 (~1e-6 m/s).
+The dashboard JS uses the same formulas.
 """
 from __future__ import annotations
 
@@ -13,31 +13,26 @@ from dataclasses import asdict, dataclass
 import numpy as np
 from scipy.signal import lfilter
 
-
 FS = 200.0
-DT = 1.0 / FS
 R_SPECIFIC_AIR = 287.05  # J kg^-1 K^-1, dry air
 RHO_REF = 1.204  # kg m^-3 at 20 C, 101325 Pa
+MODEL_ID = "sqrt"  # protocol / file id of the drag-plate model
+BOARD_METHOD, METHOD_MACRO = "drag_plate", "METHOD_DRAG_PLATE"
+FILTER_BUTTERWORTH, FILTER_EMA = 0, 1
+
+# Names the firmware accepts via SET (SPEC §1). rho_ref is PC-only.
+FIRMWARE_PARAMS = ("sqrt_k", "sqrt_x0", "lc_offset", "lc_n_per_count", "lead_tau", "filter_kind", "ema_alpha",
+                   "lpf_hz")
 
 
 def air_density(press_pa, temp_c):
     """Ideal gas law: rho = P / (R_specific * T), pressure in Pa, temperature in C."""
     return np.asarray(press_pa, dtype=float) / (R_SPECIFIC_AIR * (np.asarray(temp_c, dtype=float) + 273.15))
 
-# Names the firmware accepts via SET (SPEC §1). Anything else is PC-only.
-FIRMWARE_PARAMS = (
-    "rotor_slope", "rotor_offset", "rotor_min_hz", "rotor_window_ms",
-    "sqrt_k", "sqrt_x0", "lc_offset", "lc_n_per_count", "lead_tau", "lpf_hz",
-    "filter_kind", "ema_alpha",
-)
-FILTER_BUTTERWORTH, FILTER_EMA = 0, 1
 
-# `method` string in the board's `#cal` JSON -> AIRSPEED_METHOD macro and model id.
-BOARD_METHODS = {
-    "cup_encoder": ("METHOD_CUP_ENCODER", "rotor"),
-    "cup_hall": ("METHOD_CUP_HALL", "rotor"),
-    "drag_plate": ("METHOD_DRAG_PLATE", "sqrt"),
-}
+def pitot_speed(dp_pa, rho):
+    """Pitot: v = sqrt(2·max(dp, 0)/rho), for a ground-truth script that prints differential pressure."""
+    return np.sqrt(2.0 * np.maximum(np.asarray(dp_pa, dtype=float), 0.0) / rho)
 
 
 @dataclass(frozen=True)
@@ -55,92 +50,45 @@ class ParamSpec:
         return asdict(self)
 
 
-@dataclass(frozen=True)
-class ModelSpec:
-    id: str
-    label: str
-    methods: tuple  # firmware AIRSPEED_METHOD values this model covers
-    params: tuple
-    fit_params: tuple  # default free set for static fits
-    sim_feature: str  # channel name the simulator uses for this model's feature
-    note: str = ""
-
-
-COMMON_PARAMS = (
-    ParamSpec("filter_kind", 0.0, 0.0, 1.0, 1.0, "", "Output smoother: 0 = Butterworth on lpf_hz, 1 = EMA on ema_alpha", "dynamics"),
-    ParamSpec("ema_alpha", 1.0, 0.0001, 1.0, 0.0001, "", "EMA weight of the newest sample: V = a*V_new + (1-a)*V_prev; 1 = off", "dynamics"),
-    # Only mirrors a board whose filter_kind is still 0 (Butterworth); never fitted or exported.
-    ParamSpec("lpf_hz", 10.0, 0.0, 99.0, 0.1, "Hz", "Butterworth cutoff of an unconfigured board (filter_kind 0)", "dynamics"),
-    ParamSpec("lead_tau", 0.0, 0.0, 0.5, 0.001, "s", "First-order lead to cancel transducer lag; 0 = off", "dynamics"),
+PARAMS = (
+    ParamSpec("sqrt_k", 171.0, 1.0, 5000.0, 0.1, "1/m²", "k = 2/(Cd·A)", "static"),
+    ParamSpec("sqrt_x0", 0.0, -1.0, 1.0, 0.0001, "N", "Zero-flow force F0", "static"),
+    ParamSpec("lc_offset", 0.0, -1e7, 1e7, 1.0, "counts", "Load-cell tare (set by TARE)", "board"),
+    ParamSpec("lc_n_per_count", 2.0e-5, 1e-8, 1e-2, 1e-8, "N/count", "Load-cell scale (from `calib weights`)", "board"),
+    ParamSpec("filter_kind", 1.0, 0.0, 1.0, 1.0, "", "Output smoother: 1 = EMA on ema_alpha, 0 = Butterworth on lpf_hz", "dynamics"),
+    ParamSpec("ema_alpha", 0.2, 0.0001, 1.0, 0.0001, "", "EMA weight of the newest sample: V = a·V_new + (1−a)·V_prev", "dynamics"),
+    ParamSpec("lpf_hz", 10.0, 0.0, 99.0, 0.1, "Hz", "Butterworth cutoff (2nd order: damps the plate's ringing)", "dynamics"),
+    ParamSpec("lead_tau", 0.0, 0.0, 0.5, 0.001, "s", "First-order lead to cancel the plate's lag; 0 = off", "dynamics"),
     ParamSpec("rho_ref", RHO_REF, 1.0, 1.4, 0.001, "kg/m³", "Density used when the stream has no rho column", "environment"),
 )
-
-MODELS: dict[str, ModelSpec] = {
-    "rotor": ModelSpec(
-        "rotor",
-        "Cup anemometer",
-        ("METHOD_CUP_ENCODER", "METHOD_CUP_HALL"),
-        (
-            ParamSpec("rotor_slope", 2.0, 0.0, 20.0, 0.001, "m/s per rev/s", "Linear gain", "static"),
-            ParamSpec("rotor_offset", 0.3, -3.0, 3.0, 0.001, "m/s", "Offset (starting speed)", "static"),
-            ParamSpec("rotor_min_hz", 0.2, 0.0, 5.0, 0.01, "rev/s", "Below this the rotor counts as stalled: output 0", "static"),
-            ParamSpec("rotor_window_ms", 50.0, 5.0, 500.0, 5.0, "ms", "Rate-estimator window on the board: noise vs lag", "board"),
-        ),
-        ("rotor_slope", "rotor_offset"),
-        "feature_rotor",
-    ),
-    "sqrt": ModelSpec(
-        "sqrt",
-        "Drag plate",
-        ("METHOD_DRAG_PLATE",),
-        (
-            ParamSpec("sqrt_k", 171.0, 1.0, 5000.0, 0.1, "", "Gain; drag plate k = 2/(Cd·A)", "static"),
-            ParamSpec("sqrt_x0", 0.0, -1.0, 1.0, 0.0001, "feature units", "Feature at zero flow", "static"),
-            ParamSpec("lc_offset", 0.0, -1e7, 1e7, 1.0, "counts", "Load-cell tare (set by TARE)", "board"),
-            ParamSpec("lc_n_per_count", 2.0e-5, 1e-8, 1e-2, 1e-8, "N/count", "Load-cell scale (from `calib weights`)", "board"),
-        ),
-        ("sqrt_k", "sqrt_x0"),
-        "feature_sqrt",
-        "lc_* are applied on the board before the feature; fix them with TARE and the weight routine.",
-    ),
-}
+STATIC_PARAMS = ("sqrt_k", "sqrt_x0")
 
 
-def param_specs(model_id: str) -> list[ParamSpec]:
-    return list(MODELS[model_id].params) + list(COMMON_PARAMS)
+def default_params() -> dict[str, float]:
+    return {p.name: p.value for p in PARAMS}
 
 
-def default_params(model_id: str) -> dict[str, float]:
-    return {p.name: p.value for p in param_specs(model_id)}
+def bounds() -> dict[str, tuple[float, float]]:
+    return {p.name: (p.min, p.max) for p in PARAMS}
 
 
-def bounds(model_id: str) -> dict[str, tuple[float, float]]:
-    return {p.name: (p.min, p.max) for p in param_specs(model_id)}
+def catalog() -> dict:
+    """JSON-ready model description for the dashboard `hello` message."""
+    return {MODEL_ID: {"label": "Drag plate", "methods": [METHOD_MACRO], "fit_params": list(STATIC_PARAMS),
+                       "params": [p.to_dict() for p in PARAMS]}}
 
 
-def models_catalog() -> dict:
-    """JSON-ready catalogue for the dashboard `hello` message."""
-    return {
-        mid: {
-            "label": m.label,
-            "input": ["feature", m.sim_feature],
-            "methods": list(m.methods),
-            "fit_params": list(m.fit_params),
-            "note": m.note,
-            "params": [p.to_dict() for p in param_specs(mid)],
-        }
-        for mid, m in MODELS.items()
-    }
+def filter_kind_of(params: dict) -> int:
+    """Firmware rule: filter_kind >= 0.5 selects the EMA, anything else (incl. NaN) the Butterworth."""
+    try:
+        return FILTER_EMA if float(params.get("filter_kind", 0.0)) >= 0.5 else FILTER_BUTTERWORTH
+    except (TypeError, ValueError):
+        return FILTER_BUTTERWORTH
 
 
-def feature_channel(model_id: str, raw: dict) -> str:
-    """Prefer the model-specific simulated feature, else the board's `feature` column."""
-    sim = MODELS[model_id].sim_feature
-    if sim in raw:
-        return sim
-    if "feature" in raw:
-        return "feature"
-    raise KeyError(f"no feature column for {model_id}; have {sorted(raw)}")
+def smoothing_param(params: dict) -> str:
+    """The active smoother's tuning parameter."""
+    return "ema_alpha" if filter_kind_of(params) == FILTER_EMA else "lpf_hz"
 
 
 def _ffill(x) -> np.ndarray:
@@ -159,47 +107,32 @@ def _ffill(x) -> np.ndarray:
     return out
 
 
-def density(params: dict, raw: dict, n: int):
+def density(params: dict, raw: dict, n: int) -> np.ndarray:
     rho_ref = params.get("rho_ref", RHO_REF)
-    if "rho" in raw:
-        rho = _ffill(raw["rho"]) if np.isfinite(raw["rho"]).any() else np.full(n, rho_ref)
+    if "rho" in raw and np.isfinite(raw["rho"]).any():
+        rho = _ffill(raw["rho"])
         return np.where(rho > 0.5, rho, rho_ref)
-    return rho_ref
+    return np.full(n, rho_ref)
 
 
-def speed_linear(f, slope, offset, min_feature):
-    f = np.asarray(f, dtype=float)
-    v = np.maximum(slope * f + offset, 0.0)
-    return np.where(f >= min_feature, v, 0.0)  # NaN >= x is False -> 0, as in C
-
-
-def speed_sqrt_density(x, k, x0, rho):
-    x = np.asarray(x, dtype=float)
-    rho = np.asarray(rho, dtype=float)
+def static_map(params: dict, raw: dict) -> np.ndarray:
+    """speed_sqrt_density: v = sqrt(k·(F − F0)/rho), 0 where the argument is not positive (F < F0 guard)."""
+    if "feature" not in raw:
+        raise KeyError(f"no feature (drag force) column; have {sorted(raw)}")
+    x = _ffill(raw["feature"])
+    rho = density(params, raw, len(x))
     with np.errstate(invalid="ignore", divide="ignore"):
-        arg = k * (x - x0) / rho
-        out = np.where(arg > 0.0, np.sqrt(np.where(arg > 0.0, arg, 0.0)), 0.0)
-    return np.where(rho > 0.0, out, 0.0)
-
-
-def static_map(model_id: str, params: dict, raw: dict) -> np.ndarray:
-    x = _ffill(raw[feature_channel(model_id, raw)])
-    p = params
-    if model_id == "rotor":
-        return speed_linear(x, p["rotor_slope"], p["rotor_offset"], p["rotor_min_hz"])
-    if model_id == "sqrt":
-        return speed_sqrt_density(x, p["sqrt_k"], p["sqrt_x0"], density(p, raw, len(x)))
-    raise KeyError(model_id)
+        arg = params["sqrt_k"] * (x - params["sqrt_x0"]) / rho
+        return np.where(arg > 0.0, np.sqrt(np.where(arg > 0.0, arg, 0.0)), 0.0)
 
 
 def biquad_coeffs(cutoff_hz: float, fs: float = FS):
     """RBJ Butterworth low-pass, Q = 1/sqrt(2). Returns (b0, b1, b2, a1, a2); pass-through if disabled."""
     if not (cutoff_hz > 0.0) or not (fs > 0.0) or cutoff_hz >= 0.5 * fs:
         return 1.0, 0.0, 0.0, 0.0, 0.0
-    q = 0.70710678
     w0 = 2.0 * math.pi * cutoff_hz / fs
     cw = math.cos(w0)
-    alpha = math.sin(w0) / (2.0 * q)
+    alpha = math.sin(w0) / (2.0 * 0.70710678)
     a0 = 1.0 + alpha
     b0 = (1.0 - cw) / 2.0 / a0
     return b0, (1.0 - cw) / a0, b0, -2.0 * cw / a0, (1.0 - alpha) / a0
@@ -207,8 +140,7 @@ def biquad_coeffs(cutoff_hz: float, fs: float = FS):
 
 @dataclass
 class DynState:
-    """Mirror of the firmware filter state (Median3, LeadCompensator, Ema / ButterworthLowPass), so
-    streaming chunk-by-chunk gives exactly the same output as one batch call."""
+    """Mirror of the firmware filter state, so streaming chunk-by-chunk equals one batch call."""
 
     lead_primed: bool = False
     x_prev: float = 0.0
@@ -223,29 +155,26 @@ class DynState:
     filter_kind: int = -1     # last smoother used; switching resets both filters, as on the board
 
 
-def lead(x: np.ndarray, tau: float, fs: float, st: DynState) -> np.ndarray:
-    """airmath::LeadCompensator: y = x + tau*fs*(x - x_prev); the first sample passes through."""
-    gain = tau * fs if (tau > 0.0 and fs > 0.0) else 0.0
-    prev = np.concatenate(([st.x_prev if st.lead_primed else x[0]], x[:-1]))
-    y = x + gain * (x - prev)
-    st.lead_primed, st.x_prev = True, float(x[-1])
-    return y
-
-
 def median3(y: np.ndarray, st: DynState) -> np.ndarray:
     """airmath::Median3: the first three samples pass through, then the median of the last three."""
     hist = np.asarray(st.med_hist, dtype=float)
     ext = np.concatenate((hist, y))
-    h = len(hist)
     out = y.copy()
-    n = len(y)
     first = max(0, 3 - st.med_count)  # chunk index of the first median output
-    if first < n:
-        j = np.arange(first, n) + h
+    if first < len(y):
+        j = np.arange(first, len(y)) + len(hist)
         out[first:] = np.median(np.stack((ext[j - 2], ext[j - 1], ext[j])), axis=0)
-    st.med_count = min(st.med_count + n, 3)
+    st.med_count = min(st.med_count + len(y), 3)
     st.med_hist = tuple(ext[-2:].tolist())
     return out
+
+
+def lead(x: np.ndarray, tau: float, fs: float, st: DynState) -> np.ndarray:
+    """airmath::LeadCompensator: y = x + tau·fs·(x − x_prev); the first sample passes through."""
+    gain = tau * fs if (tau > 0.0 and fs > 0.0) else 0.0
+    prev = np.concatenate(([st.x_prev if st.lead_primed else x[0]], x[:-1]))
+    st.lead_primed, st.x_prev = True, float(x[-1])
+    return x + gain * (x - prev)
 
 
 def butterworth(y: np.ndarray, cutoff_hz: float, fs: float, st: DynState) -> np.ndarray:
@@ -255,31 +184,21 @@ def butterworth(y: np.ndarray, cutoff_hz: float, fs: float, st: DynState) -> np.
         st.lpf_primed = False
     b0, b1, b2, a1, a2 = biquad_coeffs(cutoff_hz, fs)
     if not st.lpf_primed:
-        st.s2 = y[0] * (b2 - a2)
-        st.s1 = y[0] * (1.0 - b0)
+        st.s2, st.s1 = y[0] * (b2 - a2), y[0] * (1.0 - b0)
     # Transposed DF-II with state (s1, s2) is exactly lfilter with zi = [s1, s2].
     z, zf = lfilter([b0, b1, b2], [1.0, a1, a2], y, zi=[st.s1, st.s2])
     st.lpf_primed, st.s1, st.s2, st.lpf_hz = True, float(zf[0]), float(zf[1]), cutoff_hz
     return z
 
 
-def filter_kind_of(params: dict) -> int:
-    """Firmware rule: filter_kind >= 0.5 selects the EMA, anything else (incl. NaN) the Butterworth."""
-    try:
-        return FILTER_EMA if float(params.get("filter_kind", 0.0)) >= 0.5 else FILTER_BUTTERWORTH
-    except (TypeError, ValueError):
-        return FILTER_BUTTERWORTH
-
-
 def ema(y: np.ndarray, alpha: float, st: DynState) -> np.ndarray:
-    """airmath::Ema: primed to its first input (y = x), then y += alpha*(x - y).
-    Changing alpha keeps the state, as set_alpha() does on the board."""
+    """airmath::Ema: primed to its first input, then y += alpha·(x − y). Alpha clamped to [1e-4, 1]
+    (NaN or <= 0 -> 1e-4); changing alpha keeps the state, as set_alpha() does on the board."""
     a = float(alpha)
     a = 1e-4 if not math.isfinite(a) or a <= 0.0 else min(max(a, 1e-4), 1.0)
     if not st.ema_primed:
         st.ema_y, st.ema_primed = float(y[0]), True
-    # y_k = a x_k + (1-a) y_{k-1}  ==  lfilter([a], [1, -(1-a)]) with zi = (1-a) * y_prev
-    z, zf = lfilter([a], [1.0, -(1.0 - a)], y, zi=[(1.0 - a) * st.ema_y])
+    z, _ = lfilter([a], [1.0, -(1.0 - a)], y, zi=[(1.0 - a) * st.ema_y])
     st.ema_y = float(z[-1])
     return z
 
@@ -290,8 +209,7 @@ def dynamics(x, params: dict, fs: float = FS, state: DynState | None = None) -> 
     if len(x) == 0:
         return x
     st = state if state is not None else DynState()
-    y = median3(x, st)
-    y = lead(y, float(params.get("lead_tau", 0.0)), fs, st)
+    y = lead(median3(x, st), float(params.get("lead_tau", 0.0)), fs, st)
     kind = filter_kind_of(params)
     if kind != st.filter_kind:  # firmware resets both smoothers when filter_kind changes
         st.lpf_primed = st.ema_primed = False
@@ -303,9 +221,8 @@ def dynamics(x, params: dict, fs: float = FS, state: DynState | None = None) -> 
     return np.maximum(y, 0.0)
 
 
-def apply(model_id: str, params: dict, raw: dict, fs: float = FS, state: DynState | None = None) -> np.ndarray:
+def apply(params: dict, raw: dict, fs: float = FS, state: DynState | None = None) -> np.ndarray:
     """Full model: static map + dynamics. `raw` is {channel: array} at the board sample rate."""
-    full = default_params(model_id)
+    full = default_params()
     full.update(params)
-    return dynamics(static_map(model_id, full, raw), full, fs, state)
-
+    return dynamics(static_map(full, raw), full, fs, state)

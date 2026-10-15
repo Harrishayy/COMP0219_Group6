@@ -24,15 +24,13 @@ def _add_gt_args(p):
     g.add_argument("--gt-module", help="path/to/gt.py:function returning m/s (or a generator)")
     g.add_argument("--gt-port", help="serial port streaming GT floats")
     g.add_argument("--gt-baud", type=int, default=115200)
+    g.add_argument("--gt-pressure", action="store_true", help="GT prints pitot differential pressure (Pa), not m/s")
 
 
-def _load_params(model: str, path: str | None) -> dict:
-    p = models.default_params(model)
+def _load_params(path: str | None) -> dict:
+    p = models.default_params()
     if path:
-        rec = export.load(path)
-        if rec["model"] != model:
-            raise SystemExit(f"{path} is for model {rec['model']}, not {model}")
-        p.update(rec["params"])
+        p.update(export.load(path)["params"])
     return p
 
 
@@ -51,29 +49,28 @@ def cmd_ports(a):
 
 
 def cmd_sim(a):
-    sim = SimulatedTunnel(model=a.model, profile=a.profile, seed=a.seed)
+    sim = SimulatedTunnel(profile=a.profile, seed=a.seed)
     run = sim.generate(a.duration)
-    out = save_csv(run, a.out or ROOT / "runs" / f"sim_{a.model}_{a.profile}_{a.seed}.csv")
+    out = save_csv(run, a.out or ROOT / "runs" / f"sim_{a.profile}_{a.seed}.csv")
     print(f"wrote {len(run.t_s)} samples to {out}")
     tr = sim.truth
-    print(f"truth: rotor_slope≈{tr.rotor_slope} rotor_offset≈{tr.rotor_offset}  "
-          f"sqrt_k(effective)≈{tr.sqrt_k * tr.lc_n_per_count / sim.board['lc_n_per_count']:.1f} "
+    print(f"truth: sqrt_k≈{tr.sqrt_k * tr.lc_n_per_count / sim.board['lc_n_per_count']:.1f} "
           f"sqrt_x0≈{(tr.lc_offset - sim.board['lc_offset']) * sim.board['lc_n_per_count']:.4f}")
 
 
 def cmd_record(a):
     """Headless recording in the same session format as the dashboard (CSV + JSON sidecar), with the
-    PC preview computed from --params (default: model defaults)."""
+    PC preview computed from --params (default: defaults)."""
     from app.server import Engine
 
     if not (a.port or a.gt_cmd or a.gt_module or a.gt_port):
         raise SystemExit("nothing to record: give --port and/or a --gt-* option")
-    eng = Engine("live", a.model, sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd, gt_module=a.gt_module,
-                 gt_port=a.gt_port, gt_baud=a.gt_baud)
+    eng = Engine("live", sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd, gt_module=a.gt_module,
+                 gt_port=a.gt_port, gt_baud=a.gt_baud, gt_pressure=a.gt_pressure)
     if a.params:
-        eng.set_params({k: v for k, v in _load_params(a.model, a.params).items() if k in models.bounds(a.model)})
+        eng.set_params({k: v for k, v in _load_params(a.params).items() if k in models.bounds()})
     eng.start()
-    print(eng.toggle_record(True, a.label or f"rec_{a.model}"), f"for {a.duration:g} s (Ctrl-C to stop early)")
+    print(eng.toggle_record(True, a.label or "rec_drag_plate"), f"for {a.duration:g} s (Ctrl-C to stop early)")
     t0 = time.time()
     try:
         while time.time() - t0 < a.duration:
@@ -92,10 +89,10 @@ def cmd_record(a):
     eng.stop()
 
 
-def _report_text(model, params, run, window):
+def _report_text(params, run, window):
     raw, gt = fit.prepare(run, window)
-    est = models.apply(model, params, raw)
-    lines = [f"model {model}: " + _fmt_metrics(metrics.compute(est, gt))]
+    est = models.apply(params, raw)
+    lines = ["PC preview: " + _fmt_metrics(metrics.compute(est, gt))]
     if "v" in raw:
         lines.append("board v : " + _fmt_metrics(metrics.compute(raw["v"], gt)))
     st = metrics.step_metrics(est, gt)
@@ -103,13 +100,16 @@ def _report_text(model, params, run, window):
         lines.append(f"steps ({len(st['steps'])}): " + "  ".join(f"{k}={v:.3g}" for k, v in st["median"].items()))
     for b in metrics.by_speed_band(est, gt):
         lines.append(f"  band {b['band']:>6} m/s  n={b['n']:6d}  bias={b['bias']:+.3f}  sigma={b['sigma']:.3f}  rmse={b['rmse']:.3f}")
+    for f in metrics.diagnose(est, gt, raw.get("feature"), raw.get("rho"), params):
+        lines.append(f"[{f['severity']}] {f['title']}: {f['why']} -> {f['action']}"
+                     + (f"  apply {f['apply']}" if f["apply"] else ""))
     return "\n".join(lines), raw, gt, est
 
 
 def cmd_report(a):
     run = load_csv(a.csv)
-    params = _load_params(a.model, a.params)
-    text, raw, gt, est = _report_text(a.model, params, run, a.window)
+    params = _load_params(a.params)
+    text, raw, gt, est = _report_text(params, run, a.window)
     print(text)
     if a.png:
         try:
@@ -124,7 +124,7 @@ def cmd_report(a):
         t = t - t[0]
         fig, ax = plt.subplots(3, 1, figsize=(11, 8), sharex=False)
         ax[0].plot(t, gt, lw=1, label="ground truth")
-        ax[0].plot(t, est, lw=1, label=f"{a.model} (PC)")
+        ax[0].plot(t, est, lw=1, label="PC preview")
         if "v" in raw:
             ax[0].plot(t, raw["v"], lw=0.8, alpha=0.6, label="board v")
         ax[0].set_ylabel("m/s"); ax[0].legend(); ax[0].grid(alpha=0.3)
@@ -137,22 +137,22 @@ def cmd_report(a):
 
 def cmd_fit(a):
     run = load_csv(a.csv)
-    params = _load_params(a.model, a.params)
+    params = _load_params(a.params)
     free = a.free.split(",") if a.free else None
     raw, gt = fit.prepare(run, a.window, a.lag_ms / 1000.0)
-    r = fit.fit_arrays(a.model, params, raw, gt, a.method, free)
+    r = fit.fit_arrays(params, raw, gt, a.method, free)
     print(f"{a.method} on {r.n} samples ({r.elapsed_s:.2f} s): {r.message}")
     print("before: " + _fmt_metrics(r.before))
     print("after : " + _fmt_metrics(r.after))
     for f in r.free:
         print(f"  {f:16s} {params[f]:>14.6g} -> {r.params[f]:.6g}")
     if a.cv:
-        cv = fit.cross_validate(a.model, r.params, raw, gt, a.method, free, k=a.cv)
+        cv = fit.cross_validate(r.params, raw, gt, a.method, free, k=a.cv)
         print(f"blocked {a.cv}-fold CV: test mse {cv['test_mse_mean']:.5f} ± {cv['test_mse_std']:.5f}")
     if not r.ok:
         raise SystemExit("fit failed; nothing exported")
-    paths = export.write(a.model, r.params, {"method": a.method, "free": r.free, "n": r.n, "source": a.csv,
-                                             "window_s": a.window}, r.before, r.after, install=a.install)
+    paths = export.write(r.params, {"method": a.method, "free": r.free, "n": r.n, "source": a.csv,
+                                    "window_s": a.window}, r.before, r.after, install=a.install)
     for k, v in paths.items():
         print(f"{k:9s} {v}")
 
@@ -201,7 +201,7 @@ def cmd_session(a):
         path = path.with_suffix(".json")
     sess = load_session(path)
     m = sess.get("meta", {})
-    print(f"session {path.name}: {m.get('mode')} {m.get('model')} started {m.get('started')}  rows={m.get('rows')}")
+    print(f"session {path.name}: {m.get('mode')} started {m.get('started')}  rows={m.get('rows')}")
     print(_session_table(sess))
     if a.png:
         try:
@@ -247,9 +247,8 @@ def cmd_session(a):
 
 def cmd_export(a):
     rec = export.load(a.json)
-    params = models.default_params(rec["model"])
-    params.update(rec["params"])
-    paths = export.write(rec["model"], params, rec.get("fit"), rec.get("metrics_before"), rec.get("metrics_after"),
+    params = {**models.default_params(), **rec["params"]}
+    paths = export.write(params, rec.get("fit"), rec.get("metrics_before"), rec.get("metrics_after"),
                          install=a.install)
     for k, v in paths.items():
         print(f"{k:9s} {v}")
@@ -323,7 +322,7 @@ def cmd_get(a):
 
 def cmd_push(a):
     rec = export.load(a.json)
-    lines = export.push_lines(rec["model"], {**models.default_params(rec["model"]), **rec["params"]})
+    lines = export.push_lines({**models.default_params(), **rec["params"]})
     replies = []
     src = _open_board(a.port, a.baud, debug_mode=False, on_info=replies.append,
                       on_cal=lambda c: replies.append(f"#cal {json.dumps(c)}"))
@@ -401,8 +400,8 @@ def cmd_serve(a):
             ports = list_ports()
             hint = ", ".join(p["device"] for p in ports) or "none found"
             print(f"no --port given: starting the simulator (serial ports: {hint})")
-    eng = Engine(mode, a.model, a.window, sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd,
-                 gt_module=a.gt_module, gt_port=a.gt_port, gt_baud=a.gt_baud, replay=a.replay,
+    eng = Engine(mode, a.window, sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd, gt_module=a.gt_module,
+                 gt_port=a.gt_port, gt_baud=a.gt_baud, gt_pressure=a.gt_pressure, replay=a.replay,
                  replay_speed=a.speed, profile=a.profile, seed=a.seed)
     serve(eng, a.host, a.http_port, not a.no_browser)
 
@@ -410,12 +409,11 @@ def cmd_serve(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m calib", description="Airspeed sensor calibration toolkit")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    model_kw = dict(choices=list(models.MODELS), default="rotor")
 
     p = sub.add_parser("ports", help="list serial ports"); p.set_defaults(fn=cmd_ports)
 
     p = sub.add_parser("serve", help="live dashboard (sim if no ports given)")
-    p.add_argument("--sim", action="store_true"); p.add_argument("--model", **model_kw)
+    p.add_argument("--sim", action="store_true")
     p.add_argument("--profile", choices=PROFILES, default="steps"); p.add_argument("--seed", type=int)
     p.add_argument("--port", help="Nucleo serial port"); p.add_argument("--baud", type=int, default=115200)
     _add_gt_args(p)
@@ -426,19 +424,19 @@ def main(argv=None):
 
     p = sub.add_parser("record", help="headless session recording (same CSV + JSON as the dashboard)")
     p.add_argument("--port"); p.add_argument("--baud", type=int, default=115200); _add_gt_args(p)
-    p.add_argument("--model", **model_kw); p.add_argument("--params", help="calibration JSON for the PC preview")
+    p.add_argument("--params", help="calibration JSON for the PC preview")
     p.add_argument("--duration", type=float, default=120); p.add_argument("--label")
     p.set_defaults(fn=cmd_record)
 
     p = sub.add_parser("sim", help="generate a synthetic run CSV")
-    p.add_argument("--model", **model_kw); p.add_argument("--profile", choices=PROFILES, default="steps")
+    p.add_argument("--profile", choices=PROFILES, default="steps")
     p.add_argument("--duration", type=float, default=90); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out"); p.set_defaults(fn=cmd_sim)
 
     for name, fn, hlp in (("fit", cmd_fit, "fit parameters to a recorded run and export"),
                           ("report", cmd_report, "metrics for a run with given params")):
         p = sub.add_parser(name, help=hlp)
-        p.add_argument("csv"); p.add_argument("--model", **model_kw)
+        p.add_argument("csv")
         p.add_argument("--params", help="calibration JSON to start from")
         p.add_argument("--window", type=float, help="only the last N seconds")
         if name == "fit":

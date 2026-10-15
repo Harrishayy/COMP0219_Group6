@@ -18,18 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = ROOT / "runs"
 
 SESSION_COLS = ("t", "gt", "v_board", "v_pc", "err_board", "err_pc", "feature", "rho", "temp_c",
-                "pressure_pa", "model", "pset")
-EVENT_KINDS = ("start", "stop", "param", "push", "fit", "model", "tare", "command", "note", "board")
-
-
-def all_param_names() -> list[str]:
-    """Union of every model's parameters, in a stable order (CSV columns stay fixed across model switches)."""
-    out: list[str] = []
-    for mid in models.MODELS:
-        for name in models.default_params(mid):
-            if name not in out:
-                out.append(name)
-    return out
+                "pressure_pa", "pset")
 
 
 def _num(x):
@@ -51,7 +40,7 @@ def _jsonable(o):
 
 class Session:
     """One recording. Rows arrive already aligned (GT interpolated onto each 200 Hz sensor sample),
-    each tagged with the parameter-set id (`pset`) in force. Any parameter/model change opens a new
+    each tagged with the parameter-set id (`pset`) in force. Any parameter change opens a new
     pset; segment metrics are computed per pset, skipping `warmup_s` after the change so filter
     transients don't get blamed on the new values.
 
@@ -59,7 +48,7 @@ class Session:
     (meta, param_sets, events, segments, summary), rewritten every `flush_s` and on close.
     """
 
-    def __init__(self, model: str, params: dict, meta: dict | None = None, label: str = "",
+    def __init__(self, params: dict, meta: dict | None = None, label: str = "",
                  path: str | Path | None = None, warmup_s: float = 0.5, fs: float = 200.0, flush_s: float = 2.0,
                  t0: float | None = None):
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -67,7 +56,7 @@ class Session:
         self.path = Path(path) if path else RUNS_DIR / f"run_{stamp}{'_' + safe if safe else ''}.csv"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.json_path = self.path.with_suffix(".json")
-        self.param_names = all_param_names()
+        self.param_names = list(models.default_params())
         self.warmup_s, self.fs, self.flush_s = warmup_s, fs, flush_s
         self._lock = threading.RLock()
         self._f = self.path.open("w", newline="")
@@ -75,20 +64,19 @@ class Session:
         self._w.writerow([*SESSION_COLS, *self.param_names])
         self.rows = 0
         self.closed = False
-        self.model = model
         self.params = dict(params)
         self.t_start = time.perf_counter() if t0 is None else t0
         self.t_last = self.t_start
         self.meta = {"started": datetime.now().astimezone().isoformat(timespec="seconds"), "stopped": None,
                      "fs": fs, "warmup_s": warmup_s, "label": label, "csv": self.path.name,
-                     "t0": self.t_start, **(meta or {}), "model": model}
+                     "t0": self.t_start, **(meta or {}), "model": models.MODEL_ID}
         self.param_sets: list[dict] = []
         self.events: list[dict] = []
         self.segments: list[dict] = []   # closed segments (metrics frozen)
         self._seg = None                 # current segment accumulator
         self._last_flush = 0.0
         self._open_pset(self.t_start, changed=[])
-        self.event("start", detail={"model": model}, t=self.t_start)
+        self.event("start", t=self.t_start)
 
     # ------------------------------------------------------------------------------ timeline
     @property
@@ -97,9 +85,8 @@ class Session:
 
     def _open_pset(self, t: float, changed: list[str]):
         k = len(self.param_sets)
-        self.param_sets.append({"pset": k, "t_start": t, "t_end": None, "model": self.model, "params": dict(self.params)})
-        self._seg = {"pset": k, "t_start": t, "changed": changed, "model": self.model,
-                     "t": [], "gt": [], "pc": [], "board": []}
+        self.param_sets.append({"pset": k, "t_start": t, "t_end": None, "params": dict(self.params)})
+        self._seg = {"pset": k, "t_start": t, "changed": changed, "t": [], "gt": [], "pc": [], "board": []}
 
     def _close_segment(self, t: float):
         seg = self._seg
@@ -115,32 +102,28 @@ class Session:
         bd = np.asarray(seg["board"], dtype=float)[keep]
         mp = metrics.compute(pc, gt, self.fs) if np.isfinite(pc).any() else None
         mb = metrics.compute(bd, gt, self.fs) if np.isfinite(bd).any() else None
-        out = {"pset": seg["pset"], "model": seg["model"], "t_start": seg["t_start"], "t_end": t_end,
+        out = {"pset": seg["pset"], "t_start": seg["t_start"], "t_end": t_end,
                "duration_s": t_end - seg["t_start"], "n": int(len(t)), "n_scored": int(keep.sum()),
                "changed": seg["changed"], "metrics_pc": mp, "metrics_board": mb}
         if final:  # keep the raw arrays only while the segment is open
             seg.clear()
         return _jsonable(out)
 
-    def change(self, model: str, params: dict, kind: str = "param", detail=None, t: float | None = None) -> bool:
-        """Record a parameter/model change. Returns True if a new pset was opened."""
+    def change(self, params: dict, kind: str = "param", detail=None, t: float | None = None) -> bool:
+        """Record a parameter change. Returns True if a new pset was opened."""
         with self._lock:
             if self.closed:
                 return False
             t = time.perf_counter() if t is None else t
             changed = [k for k in sorted(set(params) | set(self.params))
                        if not _same(params.get(k), self.params.get(k))]
-            if model == self.model and not changed:
+            if not changed:
                 return False
             for k in changed:
                 self.events.append(_jsonable({"t": t, "rel_s": t - self.t_start, "kind": kind, "name": k,
                                               "from": self.params.get(k), "to": params.get(k), "detail": detail}))
-            if model != self.model:
-                self.events.append({"t": t, "rel_s": t - self.t_start, "kind": "model", "name": "model",
-                                    "from": self.model, "to": model, "detail": detail})
-                changed = changed + ["model"]
             self._close_segment(t)
-            self.model, self.params = model, dict(params)
+            self.params = dict(params)
             self._open_pset(t, changed)
             return True
 
@@ -170,7 +153,7 @@ class Session:
             pv = [_fmt(self.params.get(k, math.nan)) for k in self.param_names]
             ps = str(self.pset)
             for i in range(n):
-                self._w.writerow([f"{t[i]:.6f}", *(_fmt(c[i]) for c in cols[1:]), self.model, ps, *pv])
+                self._w.writerow([f"{t[i]:.6f}", *(_fmt(c[i]) for c in cols[1:]), ps, *pv])
             self.rows += n
             seg = self._seg
             seg["t"].extend(t.tolist()); seg["gt"].extend(gt.tolist())
@@ -274,18 +257,8 @@ def _count_rows(path: Path) -> int:
 
 def _csv_only(csv_path: Path) -> dict:
     st = csv_path.stat()
-    model = None
-    try:
-        with csv_path.open(newline="") as f:
-            r = csv.reader(f)
-            head = next(r, [])
-            first = next(r, None)
-        if first and "model" in head:
-            model = first[head.index("model")] or None
-    except (OSError, csv.Error):
-        pass
     return {"started": datetime.fromtimestamp(st.st_mtime).astimezone().isoformat(timespec="seconds"),
-            "model": model, "mode": None, "rows": _count_rows(csv_path), "duration_s": None,
+            "model": None, "mode": None, "rows": _count_rows(csv_path), "duration_s": None,
             "psets": None, "best_mse_pc": None}
 
 

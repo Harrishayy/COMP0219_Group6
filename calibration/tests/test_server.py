@@ -1,4 +1,4 @@
-"""(5) Websocket smoke test against the simulator: hello -> frame -> set_param -> fit_result -> record."""
+"""(5) Websocket smoke test against the simulator: hello -> frame -> set_param -> fit_result -> metrics -> record."""
 import time
 
 import pytest
@@ -20,10 +20,10 @@ def _until(ws, kind, pred=lambda m: True, limit=3000):
 
 def test_websocket_smoke(tmp_path, monkeypatch):
     monkeypatch.setattr(recmod, "RUNS_DIR", tmp_path)
-    eng = Engine("sim", "sqrt", window_s=10, seed=1)
+    eng = Engine("sim", window_s=10, seed=1)
     with TestClient(create_app(eng)) as client, client.websocket_connect("/ws") as ws:
         hello = ws.receive_json()
-        assert hello["type"] == "hello" and hello["labels"] == {"rotor": "Cup anemometer", "sqrt": "Drag plate"}
+        assert hello["type"] == "hello" and hello["method"] == "drag_plate"
         frame = _until(ws, "frame", lambda m: len(m["t"]) > 0)
         assert len(frame["t"]) == len(frame["gt"]) == len(frame["est"]) == len(frame["dev"])
 
@@ -32,7 +32,8 @@ def test_websocket_smoke(tmp_path, monkeypatch):
         ws.send_json({"type": "set_param", "name": "ema_alpha", "value": 0.4})
         assert _until(ws, "params")["params"]["ema_alpha"] == 0.4
         ws.send_json({"type": "fit", "method": "robust_lsq", "window_s": 2})
-        assert _until(ws, "fit_result")["model"] == "sqrt"
+        assert _until(ws, "fit_result")["ok"]
+        assert isinstance(_until(ws, "metrics", lambda m: m["est"])["diagnosis"], list)
         time.sleep(1.0)
         ws.send_json({"type": "record", "on": False})
         done = _until(ws, "session", lambda m: not m["recording"])
