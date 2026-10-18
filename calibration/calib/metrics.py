@@ -86,12 +86,13 @@ def compute(est, gt, fs: float = 200.0, with_lag: bool = True) -> dict:
     return out
 
 
-def stream_stats(t_pc, n_col=None, nominal_hz: float = 200.0, window_s: float = 2.0) -> dict:
+def stream_stats(t_pc, n_col=None, nominal_hz: float = 200.0, window_s: float = 2.0, now: float | None = None) -> dict:
     """Arrival rate over the last `window_s`, and dropped ticks from the board's sample counter `n`
-    (PC arrival times are bursty over USB, so gaps in `n` are the reliable drop signal)."""
+    (PC arrival times are bursty over USB, so gaps in `n` are the reliable drop signal).
+    With `now`, a stream that has gone quiet for longer than `window_s` reads 0 Hz instead of its last rate."""
     t = np.asarray(t_pc, dtype=float)
     out = {"hz": 0.0, "drops": 0}
-    if len(t) >= 2:
+    if len(t) >= 2 and (now is None or now - t[-1] <= window_s):
         recent = t[t >= t[-1] - window_s]
         if len(recent) >= 2 and recent[-1] > recent[0]:
             out["hz"] = float((len(recent) - 1) / (recent[-1] - recent[0]))

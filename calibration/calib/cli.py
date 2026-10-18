@@ -387,6 +387,74 @@ def cmd_weights(a):
     print(f"saved {out}")
 
 
+def _stream_printer(scale: float, offset: float, span: float):
+    """Print one line per batch of force samples: raw counts, force, spread and a bar."""
+    print(f"scale {scale:g} N/count · offset {offset:g} counts · bar ±{span:g} counts")
+    print(f"{'time':>8} {'counts':>9} {'force N':>10} {'min':>9} {'max':>9}")
+
+    def emit(forces: list[float]):
+        counts = np.asarray(forces) / scale + offset
+        c = float(counts.mean())
+        pos = int(np.clip(20 + 20 * c / span, 0, 40))
+        bar = "·" * pos + "█" + "·" * (40 - pos)
+        print(f"{time.strftime('%H:%M:%S')} {c:9.0f} {np.mean(forces):10.5f} {counts.min():9.0f} {counts.max():9.0f}  {bar}",
+              flush=True)
+
+    return emit
+
+
+def _stream_server(a):
+    import asyncio
+
+    import websockets
+
+    async def run():
+        url = f"ws://{a.host}:{a.http_port}/ws"
+        try:
+            ws = await websockets.connect(url, max_size=None)
+        except OSError as e:
+            raise SystemExit(f"no dashboard at {url} ({e}): start `calib serve --port …` or pass --port")
+        async with ws:
+            board = json.loads(await ws.recv()).get("board", {})
+            emit = _stream_printer(board.get("lc_n_per_count") or 1e-5, board.get("lc_offset") or 0.0, a.span)
+            buf, last = [], time.monotonic()
+            async for text in ws:
+                m = json.loads(text)
+                if m.get("type") != "frame" or m.get("replace"):
+                    continue  # skip the history replay a new client gets
+                buf += [x for x in m["raw"].get("feature", []) if x is not None]
+                if buf and time.monotonic() - last >= a.interval:
+                    emit(buf)
+                    buf, last = [], time.monotonic()
+
+    asyncio.run(run())
+
+
+def _stream_serial(a):
+    cal, buf = {}, []
+    src = _open_board(a.port, a.baud, debug_mode=True, on_cal=cal.update,
+                      on_sensor=lambda t, row: buf.append(row.get("feature", float("nan"))))
+    src.send_command("GET")
+    time.sleep(0.5)
+    emit = _stream_printer(cal.get("lc_n_per_count") or 1e-5, cal.get("lc_offset") or 0.0, a.span)
+    try:
+        while True:
+            time.sleep(a.interval)
+            batch, buf[:] = [x for x in buf if np.isfinite(x)], []
+            if batch:
+                emit(batch)
+    finally:
+        src.stop()
+
+
+def cmd_stream(a):
+    """Live load-cell readout in the terminal: from the running dashboard, or straight off the board."""
+    try:
+        _stream_serial(a) if a.port else _stream_server(a)
+    except KeyboardInterrupt:
+        pass
+
+
 def cmd_serve(a):
     from app.server import Engine, serve
 
@@ -474,6 +542,14 @@ def main(argv=None):
     p.add_argument("--port", required=True); p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--old", type=float, help="current lc_n_per_count if GET is unavailable")
     p.set_defaults(fn=cmd_weights)
+
+    p = sub.add_parser("stream", help="live load-cell counts and force in the terminal (Ctrl-C to stop)")
+    p.add_argument("--port", help="read the board directly (stop the dashboard first); default: the dashboard")
+    p.add_argument("--baud", type=int, default=115200)
+    p.add_argument("--host", default="127.0.0.1"); p.add_argument("--http-port", type=int, default=8765)
+    p.add_argument("--interval", type=float, default=0.1, help="seconds per printed line")
+    p.add_argument("--span", type=float, default=2000.0, help="counts from centre to the end of the bar")
+    p.set_defaults(fn=cmd_stream)
 
     a = ap.parse_args(argv)
     a.fn(a)

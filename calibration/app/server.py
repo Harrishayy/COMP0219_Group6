@@ -34,6 +34,22 @@ STATIC = Path(__file__).resolve().parent / "static"
 FRAME_HZ, METRICS_HZ = 20.0, 2.0
 RAW_SEND = ("feature", "rho", "temp_c", "pressure_pa")
 REPLACE_WINDOW_S, REPLACE_DECIM = 60.0, 1  # full rate so the dashboard can re-run the exact 200 Hz chain
+ENV_POLL_S = 1.0  # `ENV` request period: per-thermometer, humidity and pressure readings for the dashboard
+
+
+def parse_env(line: str) -> dict:
+    """`#env t_fused=22.31 sigma=0.02 mcp9808=22.30 ... rho=1.1876` -> {name: float | None}."""
+    out = {}
+    for tok in line[len("#env"):].split():
+        k, _, v = tok.partition("=")
+        if not k or not _:
+            continue
+        try:
+            f = float(v)
+        except ValueError:
+            continue
+        out[k] = f if math.isfinite(f) else None
+    return out
 
 
 class Ring:
@@ -98,6 +114,7 @@ class Engine:
         self.gt = Ring(int(buffer_s * 250))
         self.params = models.default_params()
         self.board_cal: dict = {}
+        self.env: dict = {}  # last `#env` reply, plus its arrival time `t`
         self.info: deque = deque(maxlen=500)
         self.recorder: Session | None = None
         self._rec_seq = 0
@@ -244,6 +261,8 @@ class Engine:
             self._sent_seq = self._est_seq = self._rec_seq = 0
             self._gt_only_sent = 0
             self._replace_pending = True
+        if self.sim:  # the serial source sends GET on every (re)connect; the simulated board needs asking too
+            self.sensor_src.send_command("GET")
 
     def connect(self, cfg: dict) -> tuple[list[str], dict | None]:
         """Switch data sources at runtime (SPEC §6 `connect`). The new configuration is built and checked
@@ -277,7 +296,7 @@ class Engine:
         })
 
     def sim_control(self, msg: dict) -> list[str]:
-        """Operator controls on the simulated rig: fan profile, fan on/off, static load on the plate."""
+        """Operator controls on the simulated rig: fan profile, fan on/off, pitot on/off, static load on the plate."""
         if not self.sim:
             raise ValueError("sim controls only work with the simulator source")
         out = []
@@ -291,6 +310,9 @@ class Engine:
             if msg.get("fan") in ("on", "off"):
                 self.sim.fan_on = msg["fan"] == "on"
                 out.append(f"sim fan {msg['fan']}")
+            if msg.get("pitot") in ("on", "off"):
+                self.sim.pitot_on = msg["pitot"] == "on"
+                out.append(f"sim pitot {msg['pitot']}")
             if msg.get("load_g") is not None:
                 g = float(msg["load_g"])
                 if not math.isfinite(g) or g < 0 or g > 5000:
@@ -298,7 +320,7 @@ class Engine:
                 self.sim.load_n = g / 1000.0 * 9.80665
                 out.append(f"sim load {g:g} g on the plate ({self.sim.load_n:.4f} N)")
         if self.recorder:
-            self.recorder.event("sim", detail={k: msg[k] for k in ("profile", "fan", "load_g") if k in msg})
+            self.recorder.event("sim", detail={k: msg[k] for k in ("profile", "fan", "pitot", "load_g") if k in msg})
         return out
 
     # ------------------------------------------------------------------ source callbacks (threads)
@@ -318,6 +340,9 @@ class Engine:
 
     def _on_info(self, line: str, gen=None):
         if gen is not None and gen != self._gen:
+            return
+        if line.startswith("#env"):  # polled every second: goes to telemetry, not the log
+            self.env = {**parse_env(line), "t": time.perf_counter()}
             return
         self.info.append(line)
         if line.startswith("#cal "):
@@ -397,6 +422,12 @@ class Engine:
             # TARE is non-blocking on the board: read the new zero back once it has settled
             threading.Timer(0.6, lambda: src.send_command("GET")).start()
         return ok
+
+    def poll_env(self):
+        """Ask the board (or simulator) for its environment readings, without logging the request."""
+        src = self.sensor_src
+        if src is not None and hasattr(src, "send_command") and getattr(src, "connected", False):
+            src.send_command("ENV")
 
     def push_params(self) -> int:
         lines = export.push_lines(self.params)
@@ -483,9 +514,10 @@ class Engine:
             tg, _ = self.gt.arrays(max(self.gt.seq_end - 1000, self.gt.seq0), [])
             rec = self.recorder
             n_all = np.asarray(self.sensor.cols.get("n", []), dtype=float)
-        s = metrics.stream_stats(ts, None)
+        now = time.perf_counter()
+        s = metrics.stream_stats(ts, None, now=now)
         drops = metrics.stream_stats(n_all, n_all)["drops"] if len(n_all) > 1 else 0
-        g = metrics.stream_stats(tg)
+        g = metrics.stream_stats(tg, now=now)
 
         def last(k):
             a = cols.get(k)
@@ -508,6 +540,8 @@ class Engine:
             "profile": self.sim.profile if self.sim else None,
             "auto_push": self.auto_push,
             "board": self.board_cal,
+            "env": ({**{k: v for k, v in self.env.items() if k != "t"},
+                     "age_s": time.perf_counter() - self.env["t"]} if self.env else None),
         })
 
     def build_metrics(self) -> dict | None:
@@ -560,6 +594,7 @@ class Engine:
             "source": self._cfg.get("source"), "sources": dict(self._labels),
             "runs_dir": str(recmod.RUNS_DIR),
             "sim": ({"profile": self.sim.profile, "fan": "on" if self.sim.fan_on else "off",
+                     "pitot": "on" if self.sim.pitot_on else "off",
                      "load_g": self.sim.load_n / 9.80665 * 1000.0} if self.sim else None),
         })
 
@@ -644,6 +679,8 @@ def create_app(engine: Engine) -> FastAPI:
                 if fr:
                     await broadcast(fr)
                 engine.record_tick()
+                if k % int(FRAME_HZ * ENV_POLL_S) == 0:
+                    engine.poll_env()
                 if k % int(FRAME_HZ) == 0:
                     st = engine.session_status()
                     if st:
@@ -805,12 +842,21 @@ def create_app(engine: Engine) -> FastAPI:
             # index.html is an artifact fragment (no doctype/head/body): wrap it so it renders in
             # standards mode. Read fresh on every request so edits show on reload.
             body = page.read_text(encoding="utf-8")
+            if body.lstrip()[:9].lower() == "<!doctype":
+                return HTMLResponse(body, headers={"Cache-Control": "no-store"})
             html = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                     '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                     "</head><body>" + body + "</body></html>")
             return HTMLResponse(html, headers={"Cache-Control": "no-store"})
         return HTMLResponse("<h1>Calibration server running</h1><p>app/static/index.html is missing; "
                             "connect a client to <code>ws://localhost:8765/ws</code>.</p>")
+
+    @app.middleware("http")
+    async def no_cache(request, call_next):
+        # the dashboard is ES modules loaded straight from disk: always serve the current file
+        resp = await call_next(request)
+        resp.headers.setdefault("Cache-Control", "no-store")
+        return resp
 
     STATIC.mkdir(parents=True, exist_ok=True)
     app.mount("/", StaticFiles(directory=STATIC), name="static")

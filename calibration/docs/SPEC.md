@@ -131,8 +131,10 @@ Server → client JSON messages:
   **`replace: true`** means "discard your buffer and use this": sent to a new client and after any param
   change / fit, carrying the last 60 s at full rate (`decimated: 1`). Normal frames have
   `replace: false, decimated: 1` and are appended. telemetry also has `bad_lines, sensor_status, gt_status,
-  sensor_connected, gt_connected, profile, auto_push, board` (`board` = last `#cal` JSON); `recording` is the
-  file name or null.
+  sensor_connected, gt_connected, profile, auto_push, board, env` (`board` = last `#cal` JSON); `recording` is the
+  file name or null. `env` is the board's last `ENV` reply, which the server requests every second (`#env` lines
+  are parsed, not logged): `{t_fused, sigma, mcp9808, sht40, stts22h, lps22df, tmp36, rh, p, rho, age_s}`, a
+  missing sensor is `null`; `env` is null until the first reply. The simulator answers `ENV` too.
 - `metrics` (~2 Hz): `{type, window_s, est: {...metrics, steps: {rise_est_s, rise_gt_s, delay_t90_ms, overshoot_pct}, bands: [{band, n, bias, sigma, rmse}]}, dev: {...metrics}|null, diagnosis: [{id, severity: "high"|"medium"|"info", title, why, action, apply: {name: value}|null, gain: number|null}]}`.
   `diagnosis` is §4's rules on the metrics window with the PC preview; send `apply` back as `set_params` to act on one.
 - `fit_result`: `{type, method, params, previous, before, after, free, n, ok, message, elapsed_s, window_s}`.

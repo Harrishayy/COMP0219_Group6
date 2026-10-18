@@ -441,8 +441,8 @@ class SimTruth:
     plate_fn_hz: float = 6.0
     plate_zeta: float = 0.3
     lc_offset: float = 84213.0       # counts at zero load
-    lc_n_per_count: float = 2.07e-5  # true scale (board starts at 2.0e-5: 3.5 % error)
-    lc_noise_counts: float = 60.0
+    lc_n_per_count: float = 9.13e-6  # 1 kg cell, ~1 mV/V at 3.3 V, gain 128 (board starts 3.5 % low)
+    lc_noise_counts: float = 120.0
     # tunnel / references
     fan_tau: float = 0.7
     turb_intensity: float = 0.012
@@ -473,7 +473,8 @@ class SimulatedTunnel:
         self.t, self.n = 0.0, 0
         tr = self.truth
         # an unconfigured board (Butterworth smoother), tared with a small error (a non-zero F0 to find)
-        self.board = {**models.default_params(), "filter_kind": 0.0, "ema_alpha": 1.0}
+        self.board = {**models.default_params(), "filter_kind": 0.0, "ema_alpha": 1.0,
+                      "lc_n_per_count": tr.lc_n_per_count * 0.965}
         self.board["lc_offset"] = tr.lc_offset + 900.0
         self.board_state = models.DynState()
         # filter states
@@ -488,9 +489,11 @@ class SimulatedTunnel:
         self._plate = (np.ravel(num), np.ravel(den), np.zeros(2))
         self._lc_recent: deque = deque(maxlen=100)
         self.temp0, self.p0 = 22.3, 100870.0
+        self.temp_now, self.press_now = self.temp0, self.p0
         # operator controls used by the dashboard's guided steps
         self.fan_on = True      # False: fan stopped, airspeed decays to 0 through the fan lag
         self.load_n = 0.0       # static weight hung on the drag plate (weights routine), N
+        self.pitot_on = True    # False: bench without the tunnel's pitot, no ground-truth stream
 
     # ---- fake firmware command interface
     def command(self, line: str) -> list[str]:
@@ -517,10 +520,25 @@ class SimulatedTunnel:
             return [f"#ok lc_offset={self.board['lc_offset']:g}"]
         if cmd in ("MODE", "HDR"):
             return ["#cols," + ",".join(DEFAULT_COLS)]
+        if cmd == "ENV":
+            return [self._env_line()]
         return [f"#err unknown command {cmd}"]
 
     def _rho_now(self) -> float:
         return float(models.air_density(self.p0, self.temp0))
+
+    # per-thermometer bias (°C) and noise: the LPS22DF and TMP36 sit near warm parts of the board
+    _THERMOMETERS = {"mcp9808": (0.02, 0.01), "sht40": (-0.05, 0.02), "stts22h": (0.10, 0.03),
+                     "lps22df": (0.35, 0.03), "tmp36": (0.9, 0.3)}
+
+    def _env_line(self) -> str:
+        """The firmware's `ENV` reply (EnvSensors::print_status) for the simulated sensor stack."""
+        t, p, rng = self.temp_now, self.press_now, self.rng
+        temps = {k: t + b + s * rng.standard_normal() for k, (b, s) in self._THERMOMETERS.items()}
+        rho = float(models.air_density(p, t))
+        parts = [f"t_fused={t:.2f}", "sigma=0.02", *(f"{k}={v:.2f}" for k, v in temps.items()),
+                 f"rh={41.5 + 0.3 * rng.standard_normal():.1f}", f"p={p:.0f}", f"rho={rho:.4f}"]
+        return "#env " + " ".join(parts)
 
     # ---- physics
     def step(self, n: int) -> dict:
@@ -540,6 +558,7 @@ class SimulatedTunnel:
         temp = self.temp0 + 0.25 * np.sin(2 * np.pi * t / 600.0) + 0.02 * rng.standard_normal(n)
         press = self.p0 + 3.0 * rng.standard_normal(n)
         rho_true = models.air_density(press, temp)
+        self.temp_now, self.press_now = float(temp[-1]), float(press[-1])
         rho_meas = models.air_density(press + 2.0 * rng.standard_normal(n), temp + 0.05)
 
         # drag plate: q*CdA through the plate's mechanical 2nd-order response, then the load cell
@@ -603,7 +622,8 @@ class SimSource(Source):
             for i in range(len(d["t"])):
                 ts = t_wall0 + (d["t"][i] - t_sim0)
                 self.on_sensor(ts, {k: float(d[k][i]) for k in DEFAULT_COLS})
-                self.on_gt(ts + self.gt_latency_s, float(d["gt"][i]))
+                if self.sim.pitot_on:
+                    self.on_gt(ts + self.gt_latency_s, float(d["gt"][i]))
             due = t_wall0 + (self.sim.t - t_sim0)
             wait = due - time.perf_counter()
             if wait > 0:
