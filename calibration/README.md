@@ -28,14 +28,34 @@ python3 -m pytest -q
 python3 -m calib serve            # dashboard at http://localhost:8765 (starts on the simulator)
 ```
 
-In the dashboard:
+In the dashboard, open **Connection** (the chip at top right: dots for board, pitot and environment) and pick the
+Nucleo port and the pitot source, or start the simulator. The simulator's **Rig** switch plays the tunnel (fan and
+pitot) or the open bench (no airflow, no pitot). Every sensor works on either: steps that need airflow or the pitot
+are skipped on the bench, never blocking.
 
-1. **Setup**: pick the Nucleo port and how to read the ground truth, then press **Connect hardware**.
-2. **Steps**: tare with the fan off, load-cell scale with known masses, zero-flow force F₀, sweep 2 → 10 m/s,
-   fit Cd·A and F₀, choose the smoother and fit it with lag compensation, push and verify, export.
-3. **Tune / Fit**: adjust any setting by hand or fit it, and see the effect against the pitot straight away.
-   The diagnosis lists what to change when the sensor disagrees with the pitot (below), with the suggested values.
-4. **Record**: saves every sample with the settings in force (see below).
+There is one tab per part in the project brief, all with the same layout: the stat strip, a chart,
+**Recommendations** (what is wrong and the fix, often one click), **Calibrate** (the steps, in order), **Settings**
+where the sensor has firmware settings, and **Reference** (parts, wiring, what the brief asks, the bench test and the
+commands to run it). Tab badges show steps done.
+
+1. **Load cell**: tare, scale with known masses (the 1 kg cell takes 0–1000 g), check with one more mass.
+2. **Environment**: the five thermometers (MCP9808, SHT40, STTS22H, LPS22DF, TMP36), pressure and humidity behind
+   the air density ρ; let them settle, compare with a reference.
+3. **Pitot**: the ground truth; connect it, check it reads zero with no airflow and is quiet at a held speed.
+4. **Airspeed**: zero-flow force F₀ and a known force on the plate (anywhere); in the tunnel, sweep 2 → 10 m/s, fit
+   the curve (Cd·A, F₀), fit the smoothing and lag, push and verify against the pitot.
+5. **Encoder**, **Hall**, **IMU**: in the brief's kit but not read by the drag-plate build. Their tabs are dimmed and
+   show the reference and how to bench-test each part with its own firmware.
+6. **Runs**: record sessions, export or install the calibration, replay past runs, activity log.
+
+### Adding a sensor or changing the look
+
+The dashboard is plain ES modules in `app/static/` (no build step). A sensor is one file in
+`app/static/js/sensors/`: copy `_template.js`, fill it in and add one line to `js/sensors/index.js` (the contract is
+documented there); it gets its own tab with the shared layout and no new CSS. All colours, fonts and spacing are
+tokens in `css/tokens.css` (direction "Notebook"; fonts bundled in `fonts/` so it works offline).
+`app/static/CLAUDE.md` has the map of files, the rules and the component catalogue, so changes made with Claude stay
+consistent.
 
 The same work without the dashboard:
 
@@ -45,6 +65,7 @@ The same work without the dashboard:
 | `check --port P [--debug]` | Check the marking requirement: 200 Hz, no dropped samples, no bad lines. Exits 1 on failure. |
 | `get --port P` | Save the board's live calibration (`GET`) as JSON: the calibration file on demand. |
 | `weights --port P` | Load-cell scale from hanging known masses (drag plate). |
+| `stream [--port P]` | Live load-cell counts and force in the terminal, from the running dashboard (or straight off the board with `--port`). |
 | `record --port P --gt-cmd …` | Record a session without the dashboard. |
 | `fit run.csv` | Fit settings to a recording (`--method robust_lsq` for the curve, `dynamics` for the smoother and lag) and export. `--install` also writes the firmware header. |
 | `report run.csv` | Scores for a recording (MSE, bias, σ, lag, step response, error per speed band) and the diagnosis. |
@@ -106,7 +127,7 @@ calib/data.py      run CSV loading
 calib/export.py    calibration JSON, firmware header, SET commands
 calib/cli.py       the commands above
 app/server.py      local server behind the dashboard
-app/static/index.html  the dashboard
+app/static/         the dashboard: index.html, css/, js/core/, js/sensors/ (one file per sensor), js/pages/
 docs/SPEC.md       serial and dashboard protocol
 tests/             firmware match, fits and diagnosis, serial parsing, recording, server
 ```
