@@ -130,7 +130,9 @@ void transducer_begin() {
 #elif AIRSPEED_METHOD == METHOD_CUP_HALL
   g_tacho.begin(board::kPinHallDigital, board::kHallPulsesPerRev);
 #elif AIRSPEED_METHOD == METHOD_DRAG_PLATE
-  g_load_cell.begin(Wire, static_cast<int32_t>(g_params.lc_offset), g_params.lc_n_per_count);
+  if (!g_load_cell.begin(Wire, static_cast<int32_t>(g_params.lc_offset), g_params.lc_n_per_count)) {
+    Serial.println("#err NAU7802 not found at 0x2A: force will read 0");
+  }
 #endif
 }
 

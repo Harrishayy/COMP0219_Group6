@@ -25,6 +25,14 @@ Sht40 g_sht40;
 LPS22DFSensor* g_lps22df = nullptr;
 STTS22HSensor* g_stts22h = nullptr;
 Tmp36* g_tmp36 = nullptr;
+
+// Address-only probe ending in a STOP. The drivers below open with a register write
+// that skips the STOP (repeated start); on an absent device that NACK leaves the STM32
+// I2C peripheral wedged and every later transfer on the bus (the NAU7802) times out.
+bool ack(TwoWire& wire, uint8_t address) {
+  wire.beginTransmission(address);
+  return wire.endTransmission() == 0;
+}
 }  // namespace
 
 EnvSensors::EnvSensors(TwoWire& wire) : wire_(wire) {}
@@ -33,12 +41,12 @@ void EnvSensors::begin(const EnvConfig& config) {
   config_ = config;
   present_ = 0;
 
-  if (g_mcp9808.begin(wire_, config.addr_mcp9808)) present_ |= kHasMcp9808;
-  if (g_sht40.begin(wire_, config.addr_sht40)) present_ |= kHasSht40;
+  if (ack(wire_, config.addr_mcp9808) && g_mcp9808.begin(wire_, config.addr_mcp9808)) present_ |= kHasMcp9808;
+  if (ack(wire_, config.addr_sht40) && g_sht40.begin(wire_, config.addr_sht40)) present_ |= kHasSht40;
 
   static STTS22HSensor stts22h(&wire_);
   uint8_t id = 0;
-  if (stts22h.begin() == STTS22H_OK && stts22h.ReadID(&id) == STTS22H_OK && id == STTS22H_ID &&
+  if (ack(wire_, STTS22H_I2C_ADD_H >> 1) && stts22h.begin() == STTS22H_OK && stts22h.ReadID(&id) == STTS22H_OK && id == STTS22H_ID &&
       stts22h.Enable() == STTS22H_OK) {
     stts22h.SetOutputDataRate(25.0f);
     g_stts22h = &stts22h;
@@ -46,7 +54,7 @@ void EnvSensors::begin(const EnvConfig& config) {
   }
 
   static LPS22DFSensor lps22df(&wire_);
-  if (lps22df.begin() == LPS22DF_OK && lps22df.ReadID(&id) == LPS22DF_OK && id == LPS22DF_ID &&
+  if (ack(wire_, LPS22DF_I2C_ADD_H >> 1) && lps22df.begin() == LPS22DF_OK && lps22df.ReadID(&id) == LPS22DF_OK && id == LPS22DF_ID &&
       lps22df.Enable() == LPS22DF_OK) {
     lps22df.SetOutputDataRate(25.0f);
     g_lps22df = &lps22df;
