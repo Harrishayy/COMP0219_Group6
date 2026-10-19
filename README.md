@@ -27,31 +27,49 @@ firmware/                 PlatformIO project (Arduino core for STM32 + direct HA
   lib/drivers/            sensor drivers: TMP36, MCP9808, SHT40, IKS4A1 env, NAU7802, encoder, Hall
   test/                   native unit tests for lib/airmath
 host/                     Python tools: logging, stream check, live plot, evaluation, density
-calibration/              calibration toolkit + live tuning dashboard (see calibration/docs/SPEC.md)
+calibration/              calibration toolkit + dashboard (pnpm dev; see calibration/docs/SPEC.md)
+scripts/bench.mjs         launcher behind the pnpm scripts (venv, board port, free HTTP port)
 docs/                     brief, wiring, calibration procedure
 data/                     logs and calibration runs worth keeping
 ```
 
-## Quick start
+## Setup
+
+You need Python 3.10+, Node 18+ with pnpm (`corepack enable` gives you pnpm), and PlatformIO to flash the
+board (`pip install platformio`, or the VS Code extension).
 
 ```bash
-# toolchain (once)
-python3 -m venv .venv && source .venv/bin/activate
-pip install platformio -r host/requirements.txt
-
-# check the I2C bus, then the environmental sensors
-cd firmware
-pio run -e i2c_scan -t upload && pio device monitor
-pio run -e env_monitor -t upload && pio device monitor
-
-# competition firmware
-pio run -e airspeed -t upload
-cd ..
-python host/check_stream.py -d 30 --debug      # 200 Hz, no drops?
-python host/live_plot.py                       # watch it
+git clone <this repo> && cd sensors
+pnpm dev            # calibration dashboard on the simulator, opens http://localhost:8765
 ```
 
-On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar) otherwise.
+The first `pnpm dev` creates `.venv` and installs `calibration/requirements.txt`; later runs start in a second.
+Nothing else needs installing for the dashboard: it is plain JavaScript served by the Python toolkit.
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Dashboard on the simulator. In Connection › Rig, switch between the tunnel and the open bench |
+| `pnpm dev:board` | Dashboard on the Nucleo; finds `/dev/cu.usbmodem*` or `/dev/ttyACM*` (or set `BENCH_PORT`) |
+| `pnpm dev:board --gt-cmd "python3 gt.py"` | Same, with the lab's pitot script as ground truth (add `--gt-pressure` if it prints Pa) |
+| `pnpm test` | Calibration toolkit tests |
+
+Extra arguments go to `python -m calib serve`. If 8765 is taken (another dashboard), the next free port is
+used and printed. On Windows pass the port: `pnpm dev:board --port COM5`.
+
+### Flash the board
+
+```bash
+cd firmware
+pio run -e i2c_scan -t upload && pio device monitor      # every sensor answers at its address?
+pio run -e airspeed_drag_plate -t upload                 # the competition build (drag plate)
+```
+
+Then `pnpm dev:board` and work through the tabs: load cell, environment, pitot, airspeed. Check the
+200 Hz requirement with `python host/check_stream.py -d 30 --debug` (stop the dashboard first: it holds the
+port). On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar) otherwise.
+
+Working on the code with Claude: `CLAUDE.md` maps every directory and has recipes for the common changes;
+`calibration/app/static/CLAUDE.md` covers the dashboard UI.
 
 ## Firmware
 
@@ -59,8 +77,8 @@ On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar
 
 | Env                                         | What it does                                                                 |
 | ------------------------------------------- | ---------------------------------------------------------------------------- |
-| `airspeed` (default)                        | Competition firmware: 200 Hz estimate, density-compensated, serial protocol |
-| `airspeed_cup_hall` / `airspeed_drag_plate` | Same firmware for the other transducer variants (kept building in CI)  |
+| `airspeed_drag_plate`                       | Competition firmware (the team's design): 200 Hz estimate, density-compensated, serial protocol |
+| `airspeed` / `airspeed_cup_hall`            | Same firmware for the dropped cup anemometer (encoder / Hall), kept building in CI |
 | `env_monitor`                               | All five thermometers, pressure, humidity, fused T and air density, 4 Hz CSV |
 | `i2c_scan`                                  | Lists I2C devices with the kit part each address belongs to                 |
 | `loadcell_test`                             | NAU7802 raw/force; `t` tares, `k 200` calibrates with a 200 g mass           |

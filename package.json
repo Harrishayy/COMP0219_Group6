@@ -1,0 +1,15 @@
+{
+  "name": "airspeed-bench",
+  "private": true,
+  "description": "Calibration bench for the COMP0219 drag-plate airspeed sensor. The dashboard is served by the Python toolkit in calibration/; these scripts only start it.",
+  "type": "module",
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node scripts/bench.mjs dev",
+    "dev:board": "node scripts/bench.mjs board",
+    "test": "node scripts/bench.mjs test"
+  }
+}

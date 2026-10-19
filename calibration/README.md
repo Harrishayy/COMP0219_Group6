@@ -16,6 +16,8 @@ firmware maths with new settings, fits them, and writes them back to the board (
 
 ## Install and test
 
+From the repo root, `pnpm dev` sets everything up (see the root README). By hand:
+
 ```bash
 cd calibration
 python3 -m pip install -r requirements.txt
@@ -25,7 +27,9 @@ python3 -m pytest -q
 ## Use
 
 ```bash
-python3 -m calib serve            # dashboard at http://localhost:8765 (starts on the simulator)
+pnpm dev                          # from the repo root: simulator
+pnpm dev:board                    # from the repo root: the Nucleo
+python3 -m calib serve            # by hand, from calibration/: dashboard at http://localhost:8765
 ```
 
 In the dashboard, open **Connection** (the chip at top right: dots for board, pitot and environment) and pick the
