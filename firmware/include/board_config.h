@@ -25,6 +25,9 @@ constexpr uint8_t kEncoderFilter = 6;
 // TMP36 output -> PC2 (morpho CN7 pin 35, ADC1_IN12).
 constexpr uint32_t kPinTmp36 = PC2;
 
+// LM35 output -> PC3 (morpho CN7 pin 37, ADC1_IN13). Powered from 5V (CN7 pin 18): it needs 4-30 V.
+constexpr uint32_t kPinLm35 = PC3;
+
 // Allegro Hall switch output -> D7 (PA8).
 constexpr uint32_t kPinHallDigital = PA8;
 constexpr uint8_t kHallPulsesPerRev = 1;  // magnets on the rotor
@@ -41,7 +44,7 @@ constexpr uint8_t kAddrNau7802 = 0x2A;  // fixed
 constexpr uint32_t kEnvPeriodMs = 250;
 
 inline EnvConfig env_config() {
-  return EnvConfig{kPinTmp36, kAddrMcp9808, kAddrSht40, kEnvPeriodMs};
+  return EnvConfig{kPinTmp36, kPinLm35, kAddrMcp9808, kAddrSht40, kEnvPeriodMs};
 }
 
 }  // namespace board

@@ -34,7 +34,8 @@ void setup() {
   print_present(mask, EnvSensors::kHasStts22h, "STTS22H");
   print_present(mask, EnvSensors::kHasLps22df, "LPS22DF");
   print_present(mask, EnvSensors::kHasTmp36, "TMP36");
-  Serial.println("#cols,t_ms,t_mcp9808,t_sht40,t_stts22h,t_lps22df,t_tmp36,t_fused,t_sigma,rh_pct,pressure_pa,rho");
+  print_present(mask, EnvSensors::kHasLm35, "LM35");
+  Serial.println("#cols,t_ms,t_mcp9808,t_sht40,t_stts22h,t_lps22df,t_tmp36,t_lm35,t_fused,t_sigma,rh_pct,pressure_pa,rho");
 }
 
 void loop() {
@@ -46,7 +47,7 @@ void loop() {
 
   const EnvReading& r = g_env.reading();
   const float cols[] = {r.t_mcp9808_c, r.t_sht40_c,   r.t_stts22h_c, r.t_lps22df_c,
-                        r.t_tmp36_c,   r.temp_c,      r.temp_sigma_c, r.rh_pct};
+                        r.t_tmp36_c,   r.t_lm35_c,    r.temp_c,       r.temp_sigma_c, r.rh_pct};
   Serial.print(now);
   for (float c : cols) {
     Serial.print(',');

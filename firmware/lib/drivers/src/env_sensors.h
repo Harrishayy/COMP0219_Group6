@@ -7,6 +7,7 @@
 //   STTS22H  (IKS4A1)                 +/-0.5 C
 //   LPS22DF  (IKS4A1)                 absolute pressure, die temperature
 //   TMP36    (analog)                 +/-2 C
+//   LM35     (analog, 5 V supply)     +/-1 C
 #pragma once
 
 #include <Arduino.h>
@@ -14,6 +15,7 @@
 
 struct EnvConfig {
   uint32_t pin_tmp36;
+  uint32_t pin_lm35;
   uint8_t addr_mcp9808;
   uint8_t addr_sht40;
   uint32_t period_ms;  // how often each source is refreshed
@@ -25,6 +27,8 @@ struct EnvReading {
   float t_stts22h_c = NAN;
   float t_lps22df_c = NAN;
   float t_tmp36_c = NAN;
+  float t_lm35_c = NAN;
+  float v_lm35 = NAN;        // LM35 output voltage, also when out of range (wiring diagnosis)
   float rh_pct = NAN;
   float pressure_pa = NAN;
   float temp_c = NAN;        // inverse-variance fused temperature
@@ -58,9 +62,10 @@ class EnvSensors {
   static constexpr uint8_t kHasStts22h = 1 << 2;
   static constexpr uint8_t kHasLps22df = 1 << 3;
   static constexpr uint8_t kHasTmp36 = 1 << 4;
+  static constexpr uint8_t kHasLm35 = 1 << 5;  // last read in range; it may be plugged in after boot
 
  private:
-  enum Step : uint8_t { kMcp9808, kSht40, kStts22h, kLps22df, kTmp36, kFuse, kNumSteps };
+  enum Step : uint8_t { kMcp9808, kSht40, kStts22h, kLps22df, kTmp36, kLm35, kFuse, kNumSteps };
   void run_step(Step step, uint32_t now_ms);
   void fuse(uint32_t now_ms);
 
