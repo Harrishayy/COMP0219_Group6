@@ -21,6 +21,9 @@
 //   checks(store, ctx) -> [{ id, level: 'bad' | 'warn' | 'info', title, detail, action?: { label, run(ctx) } }]
 //   info?: { summary, brief, source, parts: [{ name, role, connect, spec }], test: [string], commands: [{ label, cmd }] }
 //                                      the Reference panel at the foot of the tab
+//   wiring?: spec from js/wiring/parts/<name>.js   a Wiring sub-tab: breadboard drawing, build steps, circuit check
+//   wiringLive?(store) -> { tone, label?, text }    "on the board now" line on the Wiring tab
+//   datasheet?: { file, title, source, pages: [{ page, label }] }   a Datasheet sub-tab (PDF in docs/datasheets/)
 // }
 //
 // `store` is the live state (core/store.js), ctx = { store, actions, toast, refresh }. Keep a sensor's own
@@ -30,10 +33,12 @@
 // airflow or the pitot returns { tone: 'skip' } when they are missing; it never blocks the bench steps.
 import loadCell from './load-cell.js';
 import environment from './environment.js';
+import mcp9808 from './mcp9808.js';
+import lm35 from './lm35.js';
 import pitot from './pitot.js';
 import airspeed from './airspeed.js';
 import encoder from './encoder.js';
 import hall from './hall.js';
 import imu from './imu.js';
 
-export default [loadCell, environment, pitot, airspeed, encoder, hall, imu];
+export default [loadCell, environment, mcp9808, lm35, pitot, airspeed, encoder, hall, imu];

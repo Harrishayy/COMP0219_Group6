@@ -30,6 +30,7 @@ code, .mono { font-family: var(--mono); font-size: 0.88em; }
 .brand { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 .brand svg { display: block; }
 .brand b { font: 800 1.125rem/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.02em; }
+@media (max-width: 1600px) { .brand span { display: none; } }
 .brand span { font-size: var(--t-xs); color: var(--ink-2); padding-left: var(--sp-3); border-left: var(--border) solid var(--line); white-space: nowrap; }
 
 .tabs { display: flex; align-items: stretch; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
@@ -312,6 +313,72 @@ button.pill.rec { color: var(--bad); }
 /* Runs page */
 .cols-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); align-items: start; }
 @media (max-width: 1000px) { .cols-2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* Board banner: under the app bar whenever nothing on screen is live (no board, silent, simulator, replay) */
+.banner { border-bottom: var(--border) solid var(--line-strong); background: var(--surface); }
+.banner .wrap { display: flex; align-items: center; gap: var(--sp-3); padding-block: var(--sp-3); flex-wrap: wrap; }
+.banner-body { flex: 1 1 320px; min-width: 0; font-size: var(--t-sm); display: flex; flex-wrap: wrap; gap: 0 var(--sp-2); }
+.banner-body strong { font-weight: 700; }
+.banner.bad { background: var(--bad-soft); } .banner.bad strong { color: var(--bad); }
+.banner.warn { background: var(--warn-soft); } .banner.warn strong { color: var(--warn); }
+.banner .cmd { background: var(--surface); max-width: 100%; }
+
+/* Sensor sub-tabs: Bench, Wiring, Datasheet */
+.subtabs { align-self: flex-start; }
+.subtabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line-strong); border-radius: var(--radius) var(--radius) 0 0; }
+
+/* Charts holding old readings (no live data) */
+.chart-frame { position: relative; }
+.chart-panel.stale .chart { opacity: 0.35; }
+.stale-note { position: absolute; inset: 0; display: grid; place-items: center; font: 600 var(--t-sm)/1.4 var(--font); color: var(--ink-2); pointer-events: none; }
+.stale-note:empty { display: none; }
+
+/* Wiring: breadboard drawing and its build steps */
+.wiring { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: var(--sp-5); align-items: start; }
+@media (max-width: 1100px) { .wiring { grid-template-columns: minmax(0, 1fr); } }
+.wiring-art svg { display: block; width: 100%; height: auto; }
+.wiring-art .w-cap { font: 500 9px/1 var(--mono); fill: var(--ink-2); letter-spacing: 0.04em; }
+.wiring-art .w-num { font: 400 8px/1 var(--mono); fill: var(--ink-3); }
+.wiring-art .w-label { font: 600 10px/1 var(--mono); fill: var(--ink); paint-order: stroke; stroke: var(--pcb); stroke-width: 3px; stroke-linejoin: round; }
+.wiring-art .w-part { font: 700 11px/1 var(--font-display); fill: var(--on-pcb); letter-spacing: 0.06em; text-transform: uppercase; }
+.wiring-art .w-pin { font: 500 8.5px/1 var(--mono); fill: var(--ink); }
+.wiring-art .on-dark { fill: var(--on-pcb); }
+.wiring-art .halo { paint-order: stroke; stroke: var(--bb-body); stroke-width: 3px; stroke-linejoin: round; }
+.wiring-art .w-item { transition: opacity var(--dur) var(--ease-out); }
+.wiring-art .w-item.future { opacity: 0; }
+.wiring-art .w-item.dim { opacity: 0.18; }
+.wiring-art .w-item.optional { opacity: 0.75; }
+.wiring-art .w-wire.cur .w-core { stroke-width: 5.5; }
+.wiring-art .w-wire.draw path { stroke-dasharray: 1; animation: draw-wire 700ms var(--ease-out) both; }
+@keyframes draw-wire { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.wiring-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 460px; overflow: auto; border-top: var(--border) solid var(--line); }
+.wiring-steps li { display: grid; grid-template-columns: 24px 14px minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); align-items: start; padding: var(--sp-2) var(--sp-2); border-bottom: var(--border) solid var(--line); cursor: pointer; font-size: var(--t-sm); }
+.wiring-steps li:hover { background: var(--sunken); }
+.wiring-steps li.cur { background: var(--accent-soft); }
+.wiring-steps li.done { color: var(--ink-2); }
+.wiring-steps .n { width: 22px; height: 22px; display: grid; place-items: center; border: var(--border) solid var(--line-strong); border-radius: var(--radius); font: 600 11px/1 var(--mono); }
+.wiring-steps li.cur .n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.wiring-steps .sw { width: 14px; height: 4px; margin-top: 9px; border-radius: 2px; box-shadow: 0 0 0 1px var(--wire-edge); }
+.wiring-steps .sw.part { height: 10px; margin-top: 6px; background: var(--part-body); }
+.wiring-steps strong { font: 600 var(--t-sm)/1.35 var(--font); display: block; }
+.wiring-steps p { color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; text-wrap: pretty; }
+.wiring-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); font-size: var(--t-xs); color: var(--ink-2); align-items: center; }
+.wiring-legend > span:not(.faint) { display: inline-flex; align-items: center; gap: 6px; }
+.wiring-legend .sw { width: 16px; height: 4px; border-radius: 2px; box-shadow: 0 0 0 1px var(--wire-edge); }
+ul.plain { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--t-sm); }
+.result ul { margin: 0; padding-left: var(--sp-4); }
+
+/* Datasheet: the PDF in the browser's viewer, with jumps to the pages that matter */
+.pdf-wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+@media (max-width: 860px) { .pdf-wrap { grid-template-columns: minmax(0, 1fr); } }
+.pdf-jumps { display: flex; flex-direction: column; gap: 2px; position: sticky; top: calc(var(--appbar-h) + var(--sp-4)); }
+.pdf-jumps .label { margin-bottom: var(--sp-1); }
+.pdf-jumps button { display: flex; justify-content: space-between; gap: var(--sp-2); text-align: left; border: var(--border) solid transparent; background: none; padding: var(--sp-2); border-radius: var(--radius); cursor: pointer; font-size: var(--t-sm); }
+.pdf-jumps button:hover { background: var(--sunken); }
+.pdf-jumps button[aria-pressed="true"] { border-color: var(--line-strong); background: var(--surface); font-weight: 600; }
+.pdf-jumps .num { font: 400 var(--t-xs)/1.6 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.pdf { height: calc(100vh - var(--appbar-h) - 160px); min-height: 520px; border: var(--border) solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--sunken); }
+.pdf iframe { width: 100%; height: 100%; border: 0; display: block; }
 
 /* Mascot: Sock sways while readings stream */
 .sock-sway { transform-origin: 22px 22px; animation: sway 2.4s ease-in-out infinite; }

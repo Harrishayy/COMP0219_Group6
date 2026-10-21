@@ -16,6 +16,9 @@ change. The product brief is `PRODUCT.md` at the repo root; the server protocol 
 | Connection popover and chip                 | `js/pages/connection.js`                                |
 | Recording, export, replay, activity log     | `js/pages/runs.js`                                      |
 | Talking to the server, the 200 Hz buffer    | `js/core/store.js`                                      |
+| Board banner, browser-tab icon and title    | `js/main.js`, `js/core/sock.js` (`favicon`)             |
+| A sensor's breadboard wiring diagram        | `js/wiring/parts/<sensor>.js` (data), `js/wiring/render.js` |
+| A sensor's datasheet tab                    | the module's `datasheet`; PDF in `docs/datasheets/`     |
 
 ## Recipes
 
@@ -26,6 +29,13 @@ CSS or layout code for it: the shared page renders it. If the firmware does not 
 its reference and bench test.
 
 **Remove a sensor.** Delete its line in `js/sensors/index.js`.
+
+**Add wiring or a datasheet.** Give the module `wiring` (a spec from `js/wiring/parts/`), optionally
+`wiringLive(store)`, and `datasheet`; the page grows Bench / Wiring / Datasheet sub-tabs (`#<id>/<sub>`). The
+`wiring-diagram` skill in `.claude/skills/` has the whole procedure; `pnpm check:wiring` must pass.
+
+**No fake data.** With no live stream, the shared page shows dashes and marks charts as old readings; the
+banner says why (`store.boardState`). Do not show a held or simulated value as if it were live.
 
 **Restyle.** Change values in `css/tokens.css`. Keep the token names. The design direction is "Notebook"
 (lab notebook on graph paper): one accent (`--accent`) used only for the primary action and the current
@@ -63,6 +73,10 @@ short class name, and add a row to the catalogue below.
 | Notice          | `.notice`                               | part not in this build                   |
 | Table           | `.table` `.r` `.ok` `.warn` `.bad`      |                                          |
 | Toast           | `.toast`                                | results and board errors                 |
+| Banner          | `.banner` `.bad` `.warn`                | no board, silent board, simulator, replay |
+| Sub-tabs        | `.segmented.subtabs`                    | Bench, Wiring, Datasheet; `aria-selected` |
+| Wiring          | `.wiring` `.wiring-art` `.wiring-steps` | step `cur`, `done`; drawing items `future`, `dim` |
+| Datasheet       | `.pdf-wrap` `.pdf-jumps` `.pdf`         | jump `aria-pressed`                      |
 
 ## Check a change
 

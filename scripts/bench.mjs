@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 // One-command launcher for the calibration bench, used by the package.json scripts:
 //
-//   pnpm dev                 dashboard on the simulator
-//   pnpm dev:board           dashboard on the Nucleo (port found automatically, or BENCH_PORT=/dev/…)
+//   pnpm dev                 dashboard on the Nucleo; with no board plugged in it says so and waits for one
+//   pnpm dev:board           the same (kept for habit); BENCH_PORT=/dev/… picks the port
+//   pnpm dev:sim             dashboard on the simulator (every reading synthetic, and labelled as such)
 //   pnpm test                calibration tests
 //
 // Extra arguments go straight to `python -m calib serve`, e.g. pnpm dev:board --gt-cmd "python3 gt.py".
+//
+// Live reload: open pages reload when a dashboard file changes (the server watches calibration/app/static),
+// and the server restarts when a toolkit .py file changes (watched here), after which the page reloads itself.
+// Firmware is never flashed automatically. BENCH_RELOAD=0 turns it all off.
 // On first run it creates .venv and installs calibration/requirements.txt; it reinstalls only when that
 // file changes. If port 8765 is taken (another dashboard is running), it uses the next free one.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, watch, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,11 +57,16 @@ function ensurePython() {
   }
 }
 
+// A fixed port when one is set or exactly one is plugged in; otherwise `auto`, which makes the server wait
+// for a Nucleo (and show "No Nucleo found" on the dashboard) instead of failing or faking data.
 function findBoardPort() {
   if (process.env.BENCH_PORT) return process.env.BENCH_PORT;
-  if (WIN) fail('pass the COM port: pnpm dev:board --port COM5 (or set BENCH_PORT)');
+  if (WIN) return 'auto';
   const ports = readdirSync('/dev').filter((n) => /^(cu\.usbmodem|ttyACM)/.test(n)).map((n) => `/dev/${n}`);
-  if (!ports.length) fail('no Nucleo found (no /dev/cu.usbmodem* or /dev/ttyACM*). Plug in the ST-LINK USB port (CN1) with a data cable, or run pnpm dev for the simulator.');
+  if (!ports.length) {
+    say('no Nucleo plugged in yet: the dashboard will say so and connect when one appears (pnpm dev:sim for the simulator)');
+    return 'auto';
+  }
   if (ports.length > 1) say(`several boards found (${ports.join(', ')}); using ${ports[0]}. Set BENCH_PORT to choose.`);
   return ports[0];
 }
@@ -79,18 +89,49 @@ async function freeHttpPort() {
 async function serve(board, extra) {
   ensurePython();
   const args = ['-m', 'calib', 'serve', ...extra];
-  if (board && !extra.includes('--port')) args.push('--port', findBoardPort());
+  if (board && !extra.includes('--port') && !extra.includes('--sim') && !extra.includes('--replay')) args.push('--port', findBoardPort());
   if (!board && !extra.includes('--sim') && !extra.includes('--port') && !extra.includes('--replay')) args.push('--sim');
   if (!extra.includes('--http-port')) args.push('--http-port', String(await freeHttpPort()));
+  const reload = process.env.BENCH_RELOAD !== '0';
+  if (reload && !extra.includes('--live-reload')) args.push('--live-reload');
   say(`python ${args.join(' ')}`);
-  const child = spawn(PY, args, { cwd: CAL, stdio: 'inherit' });
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
-  child.on('exit', (code) => process.exit(code ?? 0));
+
+  let child = null, restarting = false, quitting = false;
+  const start = (again) => {
+    child = spawn(PY, again ? [...args, '--reopen'] : args, { cwd: CAL, stdio: 'inherit' });
+    child.on('exit', (code) => {
+      if (restarting) { restarting = false; return start(true); }
+      if (quitting || !reload) process.exit(code ?? 0);
+      say(`server exited (${code}); fix the error and save, it restarts on the next change`);
+      child = null;
+    });
+  };
+  start(false);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { quitting = true; child ? child.kill(sig) : process.exit(0); });
+  if (!reload) return;
+
+  let timer = null;
+  const onChange = (_event, file) => {
+    if (!file || !file.endsWith('.py') || /(^|[\\/])(tests|runs|exports)[\\/]|__pycache__/.test(file)) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {  // debounce: an editor saves several files at once
+      say(`${file} changed: restarting the server`);
+      if (child) { restarting = true; child.kill('SIGTERM'); } else start(true);
+    }, 300);
+  };
+  try {
+    watch(CAL, { recursive: true }, onChange);
+  } catch (e) {
+    say(`cannot watch Python files (${e.message}); dashboard files still live-reload`);
+  }
 }
 
 const [cmd = 'dev', ...rest] = process.argv.slice(2);
 const extra = rest[0] === '--' ? rest.slice(1) : rest;
-if (cmd === 'dev') await serve(false, extra);
-else if (cmd === 'board') await serve(true, extra);
-else if (cmd === 'test') { ensurePython(); run(PY, ['-m', 'pytest', '-q', ...extra], { cwd: CAL }); }
-else fail(`unknown command ${cmd}: use dev, board or test`);
+if (cmd === 'dev' || cmd === 'board') await serve(true, extra);
+else if (cmd === 'sim') await serve(false, extra);
+else if (cmd === 'test') {
+  ensurePython();
+  run(PY, ['-m', 'pytest', '-q', ...extra], { cwd: CAL });
+  run(process.execPath, [join(ROOT, 'scripts/check-wiring.mjs')]);
+} else fail(`unknown command ${cmd}: use dev, board, sim or test`);

@@ -12,6 +12,7 @@ import shlex
 import shutil
 import threading
 import time
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -27,14 +28,47 @@ from calib import recorder as recmod
 from calib.metrics import resample
 from calib.data import Run
 from calib.recorder import Session
-from calib.sources import (PROFILES, CSVReplaySource, GroundTruthSource, SerialSensorSource, SimSource,
+from calib.sources import (AUTO_PORT, PROFILES, CSVReplaySource, GroundTruthSource, SerialSensorSource, SimSource,
                            SimulatedTunnel, list_ports)
 
 STATIC = Path(__file__).resolve().parent / "static"
+SERVER_ID = uuid.uuid4().hex[:12]  # a new id after every restart: a page that sees it change reloads (live reload)
+LIVE_RELOAD = {"on": False}        # set by serve(live_reload=True), i.e. `pnpm dev`
+DATASHEETS = Path(__file__).resolve().parents[2] / "docs" / "datasheets"  # served at /datasheets for the UI
 FRAME_HZ, METRICS_HZ = 20.0, 2.0
 RAW_SEND = ("feature", "rho", "temp_c", "pressure_pa")
 REPLACE_WINDOW_S, REPLACE_DECIM = 60.0, 1  # full rate so the dashboard can re-run the exact 200 Hz chain
 ENV_POLL_S = 1.0  # `ENV` request period: per-thermometer, humidity and pressure readings for the dashboard
+TELEMETRY_IDLE_S = 0.5  # with no frames (no board, silent board) telemetry is still sent this often
+SILENT_AFTER_S = 2.0  # an open port with no line for this long is a silent board
+
+
+class FileWatcher:
+    """Live reload (dev): polls the mtimes of the dashboard's files; `changes()` lists what changed since the
+    last call. Polling, not OS events: no extra dependency, and ~100 files cost nothing at 2 Hz."""
+
+    EXTS = (".js", ".css", ".html", ".svg", ".pdf", ".woff2")
+
+    def __init__(self, *roots: Path):
+        self.roots = [r for r in roots if r.is_dir()]
+        self._seen = self._scan()
+
+    def _scan(self) -> dict:
+        out = {}
+        for root in self.roots:
+            for p in root.rglob("*"):
+                if p.suffix in self.EXTS:
+                    try:
+                        out[p] = p.stat().st_mtime_ns
+                    except OSError:
+                        pass
+        return out
+
+    def changes(self) -> list[str]:
+        now = self._scan()
+        changed = [str(p) for p in now.keys() | self._seen.keys() if now.get(p) != self._seen.get(p)]
+        self._seen = now
+        return sorted(changed)
 
 
 def parse_env(line: str) -> dict:
@@ -205,7 +239,7 @@ class Engine:
                 raise ValueError("serial source needs a sensor port and/or a ground-truth source")
             if validate:
                 held = self._held_ports()  # ports the running source already has open: they are fine
-                if port and port not in held:
+                if port and port != AUTO_PORT and port not in held:
                     self._check_port(port, baud)
                 if kind == "port" and val not in held:
                     self._check_port(val, int(cfg.get("gt_baud") or 115200))
@@ -229,7 +263,7 @@ class Engine:
                 s_ = SerialSensorSource(port, baud, on_sensor, on_info, on_cal)
                 out["sensor_src"] = s_
                 out["sources"].append(s_)
-                out["labels"]["sensor"] = port
+                out["labels"]["sensor"] = "auto-detect" if port == AUTO_PORT else port
             if kind != "none":
                 g = GroundTruthSource(val if kind == "module" else None, val if kind == "cmd" else None,
                                       val if kind == "port" else None, int(cfg.get("gt_baud") or 115200),
@@ -527,10 +561,12 @@ class Engine:
             return float(f[-1]) if len(f) else None
 
         bad = getattr(getattr(self.sensor_src, "parser", None), "bad_lines", 0)
+        state, detail = self.board_state(s["hz"], now)
         return _jsonable({
+            "board_state": state, "board_detail": detail,
             "sensor_hz": s["hz"], "gt_hz": g["hz"], "drops": drops, "bad_lines": bad,
             "rho": last("rho"), "temp_c": last("temp_c"), "pressure_pa": last("pressure_pa"),
-            "port_sensor": self._labels["sensor"], "port_gt": self._labels["gt"],
+            "port_sensor": self._sensor_label(), "port_gt": self._labels["gt"],
             "sensor_status": getattr(self.sensor_src, "status", "not configured"),
             "gt_status": getattr(self.gt_src, "status", "not configured"),
             "sensor_connected": bool(getattr(self.sensor_src, "connected", False)),
@@ -543,6 +579,35 @@ class Engine:
             "env": ({**{k: v for k, v in self.env.items() if k != "t"},
                      "age_s": time.perf_counter() - self.env["t"]} if self.env else None),
         })
+
+    def _sensor_label(self) -> str:
+        src = self.sensor_src
+        if getattr(src, "auto", False):
+            return src.port if src.port != AUTO_PORT else "auto-detect"
+        return self._labels["sensor"]
+
+    def board_state(self, hz: float | None, now: float) -> tuple[str, str]:
+        """Where the real board stands, so the dashboard never passes off silence or the simulator as data:
+        sim | replay | none | absent | closed | opening | silent | no_data | streaming."""
+        if self.mode == "sim":
+            return "sim", "Simulator: every reading is synthetic, not from hardware"
+        if self.mode == "replay":
+            return "replay", f"Replaying {self._labels['sensor']}: recorded data, not live"
+        src = self.sensor_src
+        if src is None:
+            return "none", "No board port configured (pitot only)"
+        if not src.connected:
+            if getattr(src, "auto", False) and src.port == AUTO_PORT:
+                return "absent", "No Nucleo found on USB"
+            return "closed", f"Cannot open {src.port}: {src.status}"
+        last = src.last_line_t if src.last_line_t is not None else src.opened_t
+        if last is None or now - last > SILENT_AFTER_S:
+            return "silent", f"{src.port} is open but the board sends nothing"
+        if src.last_line_t is None:
+            return "opening", f"Opened {src.port}, waiting for the board"
+        if not src.data_rows or not hz or hz < 1:
+            return "no_data", f"The board on {src.port} answers but streams no readings"
+        return "streaming", f"Streaming from {src.port}"
 
     def build_metrics(self) -> dict | None:
         run = self._snapshot_run(self.window_s)
@@ -593,6 +658,7 @@ class Engine:
             "gt_pressure": bool(self._cfg.get("gt_pressure")),
             "source": self._cfg.get("source"), "sources": dict(self._labels),
             "runs_dir": str(recmod.RUNS_DIR),
+            "server_id": SERVER_ID, "live_reload": LIVE_RELOAD["on"],
             "sim": ({"profile": self.sim.profile, "fan": "on" if self.sim.fan_on else "off",
                      "pitot": "on" if self.sim.pitot_on else "off",
                      "load_g": self.sim.load_n / 9.80665 * 1000.0} if self.sim else None),
@@ -669,18 +735,30 @@ def create_app(engine: Engine) -> FastAPI:
             q.put_nowait(data)
 
     async def pump():
+        watcher = FileWatcher(STATIC, DATASHEETS) if LIVE_RELOAD["on"] else None
         k = 0
         log_every = 0
+        last_tele = 0.0
         while True:
             await asyncio.sleep(1.0 / FRAME_HZ)
             k += 1
             try:
                 fr = engine.build_frame()
+                now = time.perf_counter()
                 if fr:
                     await broadcast(fr)
+                    last_tele = now
+                elif now - last_tele > TELEMETRY_IDLE_S:  # no data flowing: still say why (SPEC §6 telemetry)
+                    await broadcast({"type": "telemetry", "telemetry": engine.telemetry()})
+                    last_tele = now
                 engine.record_tick()
                 if k % int(FRAME_HZ * ENV_POLL_S) == 0:
                     engine.poll_env()
+                if watcher and k % int(FRAME_HZ / 2) == 0:
+                    changed = await asyncio.get_running_loop().run_in_executor(None, watcher.changes)
+                    if changed:  # SPEC §6 `reload`: CSS is swapped in place, anything else reloads the page
+                        await broadcast({"type": "reload", "files": [Path(f).name for f in changed],
+                                         "css_only": all(f.endswith(".css") for f in changed)})
                 if k % int(FRAME_HZ) == 0:
                     st = engine.session_status()
                     if st:
@@ -858,14 +936,19 @@ def create_app(engine: Engine) -> FastAPI:
         resp.headers.setdefault("Cache-Control", "no-store")
         return resp
 
+    if DATASHEETS.is_dir():
+        app.mount("/datasheets", StaticFiles(directory=DATASHEETS), name="datasheets")
     STATIC.mkdir(parents=True, exist_ok=True)
     app.mount("/", StaticFiles(directory=STATIC), name="static")
 
     return app
 
 
-def serve(engine: Engine, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True):
+def serve(engine: Engine, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True,
+          live_reload: bool = False):
     import uvicorn
+
+    LIVE_RELOAD["on"] = live_reload
 
     app = create_app(engine)
     url = f"http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}"

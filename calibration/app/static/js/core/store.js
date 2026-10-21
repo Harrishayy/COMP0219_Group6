@@ -109,6 +109,14 @@ class Store extends EventTarget {
   get isSim() { return this.source === 'sim'; }
   get streaming() { return this.conn === 'open' && this.tele.sensor_hz > 1; }
   get hasPitot() { return this.tele.gt_hz > 1; }
+  /** sim | replay | none | absent | closed | opening | silent | no_data | streaming (server's board_state). */
+  get boardState() {
+    if (this.conn !== 'open') return 'offline';
+    if (this.tele.board_state) return this.tele.board_state;
+    // A server from before board_state: still never present the simulator or a replay as the board.
+    if (this.source === 'sim' || this.source === 'replay') return this.source;
+    return this.tele.sensor_connected && this.tele.sensor_hz > 1 ? 'streaming' : 'silent';
+  }
   boardValue(name) { return this.board[name]; }
   /** A firmware setting whose PC value differs from what the board runs. */
   isDirty(name) {
@@ -182,6 +190,12 @@ function addLog(level, msg) {
 function onMessage(m) {
   switch (m.type) {
     case 'hello': {
+      // Live reload: a different server id means the server restarted, possibly with new code.
+      if (store.serverId && m.server_id && m.server_id !== store.serverId && m.live_reload) {
+        store.emit('reload', { css_only: false, files: ['server restarted'] });
+        return;
+      }
+      store.serverId = m.server_id;
       store.mode = m.mode;
       store.source = m.source;
       store.boardMethod = m.method;     // drag_plate | cup_hall | cup_encoder (from the board's GET)
@@ -220,6 +234,13 @@ function onMessage(m) {
       store.version++;
       break;
     }
+    case 'reload':  // live reload (pnpm dev): a dashboard file changed on disk
+      store.emit('reload', m);
+      return;
+    case 'telemetry':  // sent instead of frames while no data flows, so "no board" stays current
+      store.tele = m.telemetry || {};
+      trackEnv(store.tele.env);
+      break;
     case 'params':
       store.params = { ...m.params };
       if (m.board && Object.keys(m.board).length) store.board = { ...m.board };

@@ -1,4 +1,4 @@
-// Environment: five thermometers fused by inverse variance, LPS22DF pressure and SHT40 humidity give the air
+// Environment: six thermometers fused by inverse variance, LPS22DF pressure and SHT40 humidity give the air
 // density ρ that the airspeed uses (firmware/lib/drivers/src/env_sensors.cpp). The server polls the board's
 // `ENV` command once a second; this page reads it from telemetry.env.
 import { h } from '../core/dom.js';
@@ -12,6 +12,7 @@ const THERMOMETERS = [
   { key: 'stts22h', name: 'STTS22H', where: 'IKS4A1 shield', sigma: 0.5, color: '--s-3' },
   { key: 'lps22df', name: 'LPS22DF', where: 'IKS4A1 barometer die', sigma: 1.5, color: '--s-4' },
   { key: 'tmp36', name: 'TMP36', where: 'analog, PC2', sigma: 2.0, color: '--s-5' },
+  { key: 'lm35', name: 'LM35', where: 'analog, PC3', sigma: 1.0, color: '--s-preview' },
 ].map((t) => ({ ...t, tolerance: Math.max(0.5, 2 * t.sigma) }));
 const RHO_RANGE = [1.1, 1.3];
 const PRESSURE_RANGE_HPA = [950, 1060];
@@ -143,9 +144,9 @@ function refResult(s) {
 export default {
   id: 'environment',
   title: 'Environment',
-  part: 'MCP9808, SHT40, STTS22H, LPS22DF and TMP36 · pressure and humidity',
+  part: 'MCP9808, SHT40, STTS22H, LPS22DF, TMP36 and LM35 · pressure and humidity',
   intro: 'Air density ρ comes from these sensors and scales every airspeed reading. Check that each one agrees with the others, and with a reference if you have one.',
-  allClear: 'All five thermometers agree and the air density is plausible.',
+  allClear: 'All six thermometers agree and the air density is plausible.',
 
   status(s) {
     if (s.conn !== 'open') return { tone: 'idle', text: 'Offline' };
@@ -229,7 +230,7 @@ export default {
   },
 
   info: {
-    summary: 'Air density ρ scales the drag-plate formula, so a 1 °C error is about 0.17 % in speed. Five thermometers are fused by inverse variance; the LPS22DF gives pressure and the SHT40 humidity. The server asks the board for ENV once a second.',
+    summary: 'Air density ρ scales the drag-plate formula, so a 1 °C error is about 0.17 % in speed. Six thermometers are fused by inverse variance; the LPS22DF gives pressure and the SHT40 humidity. The server asks the board for ENV once a second.',
     brief: 'TMP36 (analog temperature) and MCP9808 (I²C temperature) for density compensation; the X-NUCLEO-IKS4A1 adds the barometer.',
     source: 'Project brief · docs/hardware.md · firmware/lib/drivers/src/env_sensors.cpp',
     parts: [
@@ -238,11 +239,12 @@ export default {
       { name: 'STTS22H', role: 'Thermometer', connect: 'I²C 0x38 · IKS4A1', spec: '± 0.5 °C' },
       { name: 'LPS22DF', role: 'Barometer (+ die temperature)', connect: 'I²C 0x5D · IKS4A1', spec: '260–1260 hPa; die temp ± 1.5 °C' },
       { name: 'TMP36', role: 'Analog thermometer', connect: 'PC2 · ADC1_IN12', spec: '10 mV/°C, 750 mV at 25 °C, ± 2 °C' },
+      { name: 'LM35', role: 'Analog thermometer (own tab)', connect: 'PC3 · ADC1_IN13 · 5 V', spec: '10 mV/°C, 0 V at 0 °C, ± 1 °C' },
     ],
     test: [
       'Run the I²C scan: 0x18, 0x38, 0x44 and 0x5D answer.',
       'Power up and wait two minutes for the boards to warm.',
-      'All five agree within their tolerance; the TMP36 is the loosest.',
+      'All six agree within their tolerance; the TMP36 is the loosest.',
       'Compare with a trusted thermometer: density within 0.3 %.',
     ],
     commands: [

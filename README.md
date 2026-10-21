@@ -40,7 +40,7 @@ board (`pip install platformio`, or the VS Code extension).
 
 ```bash
 git clone <this repo> && cd sensors
-pnpm dev            # calibration dashboard on the simulator, opens http://localhost:8765
+pnpm dev            # calibration dashboard on the Nucleo, opens http://localhost:8765
 ```
 
 The first `pnpm dev` creates `.venv` and installs `calibration/requirements.txt`; later runs start in a second.
@@ -48,12 +48,15 @@ Nothing else needs installing for the dashboard: it is plain JavaScript served b
 
 | Command | What it does |
 | --- | --- |
-| `pnpm dev` | Dashboard on the simulator. In Connection › Rig, switch between the tunnel and the open bench |
-| `pnpm dev:board` | Dashboard on the Nucleo; finds `/dev/cu.usbmodem*` or `/dev/ttyACM*` (or set `BENCH_PORT`) |
-| `pnpm dev:board --gt-cmd "python3 gt.py"` | Same, with the lab's pitot script as ground truth (add `--gt-pressure` if it prints Pa) |
-| `pnpm test` | Calibration toolkit tests |
+| `pnpm dev` | Dashboard on the Nucleo; finds `/dev/cu.usbmodem*` or `/dev/ttyACM*` (or set `BENCH_PORT`). With no board plugged in it says "No Nucleo found" and connects when one appears; it never shows made-up readings |
+| `pnpm dev:board` | The same as `pnpm dev` |
+| `pnpm dev:sim` | Dashboard on the simulator, labelled as such on every page. In Connection › Rig, switch between the tunnel and the open bench |
+| `pnpm dev --gt-cmd "python3 gt.py"` | With the lab's pitot script as ground truth (add `--gt-pressure` if it prints Pa) |
+| `pnpm test` | Calibration toolkit tests and the wiring-diagram circuit check |
+| `pnpm check:wiring` | Only the wiring-diagram circuit check |
 
-Extra arguments go to `python -m calib serve`. If 8765 is taken (another dashboard), the next free port is
+Live reload: save a dashboard file and the open page updates by itself; save a toolkit `.py` file and the
+server restarts and the page follows. `BENCH_RELOAD=0` turns it off. Extra arguments go to `python -m calib serve`. If 8765 is taken (another dashboard), the next free port is
 used and printed. On Windows pass the port: `pnpm dev:board --port COM5`.
 
 ### Flash the board
@@ -64,7 +67,9 @@ pio run -e i2c_scan -t upload && pio device monitor      # every sensor answers 
 pio run -e airspeed_drag_plate -t upload                 # the competition build (drag plate)
 ```
 
-Then `pnpm dev:board` and work through the tabs: load cell, environment, pitot, airspeed. Check the
+Then `pnpm dev` and work through the tabs: load cell, environment, MCP9808, LM35, pitot, airspeed. The
+MCP9808 and LM35 tabs have **Wiring** (a breadboard drawing to build step by step, with a circuit check) and
+**Datasheet** (the PDF, with jumps to the useful pages) sub-tabs. Check the
 200 Hz requirement with `python host/check_stream.py -d 30 --debug` (stop the dashboard first: it holds the
 port). On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar) otherwise.
 

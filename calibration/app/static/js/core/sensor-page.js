@@ -5,13 +5,20 @@
 //   desk         chart panel (switchable views) and recommendations | calibrate (the ordered steps)
 //   extras       optional panels, then settings, then the reference (parts, wiring, brief, bench test)
 //
-// When the module says it is not live in this build (`available`), only a notice and the reference show.
+// A module with `wiring` (js/wiring/parts/*.js) or `datasheet` gets sub-tabs: Bench (all of the above),
+// Wiring (breadboard drawing, build steps, circuit check) and Datasheet (the PDF). URL: #<id>/<sub>.
+//
+// With no live data (no board, silent board) readouts show a dash and charts are marked as old readings,
+// so nothing on the page passes for a live value. When the module says it is not live in this build
+// (`available`), only a notice and the reference show.
 // A sensor module is a plain object; js/sensors/index.js documents the full contract.
 import { h, fill, setText, setTone } from './dom.js';
 import { TimeChart, XYChart } from './chart.js';
 import { store, actions } from './store.js';
 import { toast, settingField } from './ui.js';
 import { referencePanel, command } from './reference.js';
+import { datasheetPanel } from './datasheet.js';
+import { wiringPanel } from '../wiring/render.js';
 
 const LEVEL_TAG = { bad: 'Fix', warn: 'Check', info: 'Note' };
 const LEVEL_RANK = { bad: 0, warn: 1, info: 2 };
@@ -25,8 +32,8 @@ export function progress(def, s) {
 
 export const isLive = (def, s) => !def.available || def.available(s).live !== false;
 
-export function mountSensorPage(root, def) {
-  const ctx = { store, actions, toast, refresh: () => renderSteps(true) };
+export function mountSensorPage(root, def, { onSub } = {}) {
+  const ctx = { store, actions, toast, refresh: () => renderSteps(true), show: (sub) => showSub(sub) };
   let lastDraw = -1, lastText = 0;
 
   // ---------------------------------------------------------------- header
@@ -76,9 +83,10 @@ export function mountSensorPage(root, def) {
     lastDraw = -1;
   }
 
-  const chartPanel = views.length && h('section.panel',
+  const staleNote = h('div.stale-note', { hidden: true });
+  const chartPanel = views.length && h('section.panel.chart-panel',
     h('div.panel-head', viewTitle, viewSub, legend, h('span.spacer'), switcher || null),
-    chartHost);
+    h('div.chart-frame', chartHost, staleNote));
 
   const extras = (def.panels || []).map((p) => {
     const body = h('div');
@@ -190,7 +198,30 @@ export function mountSensorPage(root, def) {
       h('section.panel.flush', { 'aria-label': 'Calibrate' }, h('div.panel-head', h('h3', 'Calibrate'), stepCount, def.calibrateSub && h('span.sub', def.calibrateSub)), stepList)),
     extras.map((x) => x.panel),
     settingsSection || null);
-  root.append(h('div.page', head, liveView, offPanel, referencePanel(def.info)));
+  const bench = h('div.page', liveView, offPanel, referencePanel(def.info));
+
+  // ---------------------------------------------------------------- sub-tabs: bench, wiring, datasheet
+  const wiring = def.wiring && wiringPanel(def.wiring, { live: def.wiringLive });
+  const sheet = def.datasheet && datasheetPanel(def.datasheet);
+  const subs = [
+    { id: 'bench', label: 'Bench', el: bench },
+    wiring && { id: 'wiring', label: 'Wiring', el: wiring.root },
+    sheet && { id: 'datasheet', label: 'Datasheet', el: sheet.root },
+  ].filter(Boolean);
+  let sub = 'bench';
+  const subNav = subs.length > 1 && h('div.segmented.subtabs', { role: 'tablist', 'aria-label': `${def.title} sections` },
+    subs.map((x) => h('button', { type: 'button', role: 'tab', dataset: { sub: x.id }, onclick: () => showSub(x.id, true) }, x.label)));
+  function showSub(id, fromUser = false) {
+    if (!subs.some((x) => x.id === id)) id = 'bench';
+    sub = id;
+    for (const x of subs) x.el.hidden = x.id !== id;
+    if (subNav) for (const b of subNav.children) b.setAttribute('aria-selected', String(b.dataset.sub === id));
+    if (id === 'datasheet') sheet.show();
+    if (id === 'bench') lastDraw = -1;
+    if (fromUser) onSub?.(id);
+  }
+  root.append(h('div.page', head, subNav || null, subs.map((x) => x.el)));
+  showSub('bench');
 
   if (views.length) selectView(view);
 
@@ -198,6 +229,7 @@ export function mountSensorPage(root, def) {
   function update(now) {
     if (now - lastText > 200) {
       lastText = now;
+      if (wiring && sub === 'wiring') wiring.update(store);
       const st = def.status(store);
       setTone(pill, st.tone);
       setText(pill.children[1], st.text);
@@ -214,7 +246,19 @@ export function mountSensorPage(root, def) {
         }
         return;
       }
+      const live = store.streaming;
+      if (chartPanel) {
+        chartPanel.classList.toggle('stale', !live);
+        staleNote.hidden = live || !(store.buf.n || store.envHistory.length);  // empty charts say so themselves
+        setText(staleNote, store.isSim ? '' : store.conn !== 'open' ? 'Server offline: not live' : 'No live data from the board: last readings shown');
+      }
       for (const r of readouts) {
+        if (!live) {  // never show a held value as if it were live
+          setText(r.value, '–');
+          setText(r.note, r.r.note ? 'no live data' : '');
+          setTone(r.el, null);
+          continue;
+        }
         const v = r.r.value(store);
         setText(r.value, r.r.format ? r.r.format(v) : Number.isFinite(v) ? v.toFixed(r.r.digits ?? 2) : '–');
         setText(r.note, r.r.note ? r.r.note(store) || '' : '');
@@ -231,5 +275,5 @@ export function mountSensorPage(root, def) {
     }
   }
 
-  return { update, redraw: () => { lastDraw = -1; } };
+  return { update, redraw: () => { lastDraw = -1; }, show: (id) => showSub(id || 'bench') };
 }

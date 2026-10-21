@@ -27,9 +27,10 @@ python3 -m pytest -q
 ## Use
 
 ```bash
-pnpm dev                          # from the repo root: simulator
-pnpm dev:board                    # from the repo root: the Nucleo
-python3 -m calib serve            # by hand, from calibration/: dashboard at http://localhost:8765
+pnpm dev                          # from the repo root: the Nucleo (waits for one if none is plugged in)
+pnpm dev:sim                      # from the repo root: simulator
+python3 -m calib serve            # by hand, from calibration/: waits for a Nucleo (--port auto)
+python3 -m calib serve --sim      # by hand: the simulator
 ```
 
 In the dashboard, open **Connection** (the chip at top right: dots for board, pitot and environment) and pick the

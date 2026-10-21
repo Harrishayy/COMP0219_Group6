@@ -131,8 +131,24 @@ def _noop(*_a, **_k):
 
 
 # -------------------------------------------------------------------------------------------- serial
+AUTO_PORT = "auto"
+
+
+def find_nucleo_port() -> str | None:
+    """First serial port that looks like the Nucleo's ST-LINK virtual COM port, or None."""
+    for p in list_ports():
+        text = f"{p['device']} {p['description']} {p['hwid']}".lower()
+        if "stlink" in text or "st-link" in text or "vid:pid=0483:" in text:
+            return p["device"]
+    for p in list_ports():  # no USB descriptors (some Linux setups): fall back to the device name
+        if "usbmodem" in p["device"] or "ttyACM" in p["device"]:
+            return p["device"]
+    return None
+
+
 class SerialSensorSource(Source):
-    """Reads the Nucleo over USB serial with an automatic reconnect loop."""
+    """Reads the Nucleo over USB serial with an automatic reconnect loop. With port "auto" it waits for a
+    Nucleo to be plugged in and follows it to whatever device name it gets."""
 
     name = "sensor-serial"
 
@@ -142,22 +158,34 @@ class SerialSensorSource(Source):
         self.port, self.baud = port, baud
         self.on_sensor, self.on_info, self.on_cal = on_sensor, on_info, on_cal
         self.debug_mode = debug_mode
+        self.auto = port == AUTO_PORT
         self.parser = LineParser()
         self._ser = None
         self._tx_lock = threading.Lock()
         self.lines = 0
+        self.data_rows = 0
+        self.last_line_t: float | None = None  # perf_counter of the last line, for "port open but silent"
+        self.opened_t: float | None = None
 
     def _run(self):
         import serial  # pyserial; imported lazily so sim mode works without it
 
         backoff = 0.5
         while not self._stop.is_set():
+            if self.auto:
+                found = find_nucleo_port()
+                if not found:
+                    self.port, self.status = AUTO_PORT, "no Nucleo found"
+                    self._stop.wait(1.0)
+                    continue
+                self.port = found
             try:
                 self.status = f"opening {self.port}"
                 # write_timeout: a board that stops reading must not hang this thread on a full buffer
                 with serial.Serial(self.port, self.baud, timeout=0.2, write_timeout=0.5) as ser:
                     self._ser = ser
                     self.connected, self.status, backoff = True, f"connected {self.port}", 0.5
+                    self.opened_t, self.last_line_t = time.perf_counter(), None
                     ser.reset_input_buffer()
                     if self.debug_mode:
                         self.send_command("MODE D")
@@ -184,10 +212,13 @@ class SerialSensorSource(Source):
 
     def _handle(self, t, ln):
         self.lines += 1
+        self.last_line_t = t
         r = self.parser.parse(ln)
         if r is None:
             return
         kind = r[0]
+        if kind in ("v", "d"):
+            self.data_rows += 1
         if kind == "v":
             self.on_sensor(t, {"v": r[1]})
         elif kind == "d":
@@ -529,7 +560,7 @@ class SimulatedTunnel:
 
     # per-thermometer bias (°C) and noise: the LPS22DF and TMP36 sit near warm parts of the board
     _THERMOMETERS = {"mcp9808": (0.02, 0.01), "sht40": (-0.05, 0.02), "stts22h": (0.10, 0.03),
-                     "lps22df": (0.35, 0.03), "tmp36": (0.9, 0.3)}
+                     "lps22df": (0.35, 0.03), "tmp36": (0.9, 0.3), "lm35": (0.4, 0.1)}
 
     def _env_line(self) -> str:
         """The firmware's `ENV` reply (EnvSensors::print_status) for the simulated sensor stack."""
@@ -537,6 +568,7 @@ class SimulatedTunnel:
         temps = {k: t + b + s * rng.standard_normal() for k, (b, s) in self._THERMOMETERS.items()}
         rho = float(models.air_density(p, t))
         parts = [f"t_fused={t:.2f}", "sigma=0.02", *(f"{k}={v:.2f}" for k, v in temps.items()),
+                 f"lm35_v={temps['lm35'] / 100:.4f}",
                  f"rh={41.5 + 0.3 * rng.standard_normal():.1f}", f"p={p:.0f}", f"rho={rho:.4f}"]
         return "#env " + " ".join(parts)
 

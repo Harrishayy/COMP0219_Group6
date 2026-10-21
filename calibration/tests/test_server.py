@@ -70,3 +70,72 @@ def test_bench_without_pitot():
         assert dev and 3.0 < dev[-1] < 7.0  # 20 g ≈ 0.196 N on the plate reads as a few m/s
         ws.send_json({"type": "sim", "pitot": "on"})
         _until(ws, "frame", lambda m: m["telemetry"]["gt_hz"] > 1, limit=6000)
+
+
+def test_no_board_is_reported_not_faked(monkeypatch):
+    """With no Nucleo plugged in the server waits on `auto`, says so, and sends no data frames."""
+    import calib.sources as sources
+
+    monkeypatch.setattr(sources, "find_nucleo_port", lambda: None)
+    eng = Engine("live", sensor_port=sources.AUTO_PORT)
+    with TestClient(create_app(eng)) as client, client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        tele = _until(ws, "telemetry", limit=50)["telemetry"]
+        assert tele["board_state"] == "absent" and not tele["sensor_connected"]
+        assert "No Nucleo" in tele["board_detail"]
+        for _ in range(5):  # nothing but telemetry and logs: no frames of made-up readings
+            assert ws.receive_json()["type"] in ("telemetry", "log", "ports", "runs")
+
+
+def test_board_states():
+    """Silent and data-less boards are told apart from a streaming one; the simulator says it is simulated."""
+    import time as _t
+
+    from calib.sources import SerialSensorSource
+
+    assert Engine("sim", seed=1).board_state(200.0, _t.perf_counter())[0] == "sim"
+    eng = Engine("live", sensor_port="/dev/null-board")
+    src = eng.sensor_src
+    assert isinstance(src, SerialSensorSource)
+    now = _t.perf_counter()
+    src.connected, src.opened_t = True, now - 5
+    assert eng.board_state(0.0, now)[0] == "silent"
+    src.last_line_t = now - 0.1
+    assert eng.board_state(0.0, now)[0] == "no_data"
+    src.data_rows = 10
+    assert eng.board_state(200.0, now)[0] == "streaming"
+
+
+def test_sim_env_has_lm35():
+    eng = Engine("sim", seed=1)
+    eng.sensor_src.connected = True
+    eng.poll_env()
+    env = eng.telemetry()["env"]
+    assert 15 < env["lm35"] < 30 and abs(env["lm35_v"] * 100 - env["lm35"]) < 0.01
+
+
+def test_datasheets_served():
+    eng = Engine("sim", seed=1)
+    with TestClient(create_app(eng)) as client:
+        for name in ("lm35.pdf", "mcp9808.pdf"):
+            r = client.get(f"/datasheets/{name}")
+            assert r.status_code == 200 and r.content[:5] == b"%PDF-"
+
+
+def test_live_reload_watcher(tmp_path):
+    """`pnpm dev` live reload: a changed, added or removed dashboard file is reported once."""
+    import os
+    from pathlib import Path
+
+    from app.server import FileWatcher
+
+    css, js = tmp_path / "a.css", tmp_path / "b.js"
+    css.write_text("x")
+    w = FileWatcher(tmp_path)
+    assert w.changes() == []
+    os.utime(css, ns=(1, 10**18))
+    js.write_text("y")
+    assert sorted(Path(f).name for f in w.changes()) == ["a.css", "b.js"]
+    assert w.changes() == []
+    js.unlink()
+    assert [Path(f).name for f in w.changes()] == ["b.js"]

@@ -24,3 +24,16 @@ export function sock(mood = 'idle', size = 32) {
     <rect x="18" y="16" width="6" height="88" rx="2" fill="var(--ink)"/><rect x="9" y="99" width="24" height="6" rx="2" fill="var(--ink)"/>
     <g class="${m.sway ? 'sock-sway' : ''}">${bands}</g></svg>`;
 }
+
+/**
+ * Browser-tab icon: Sock in its current mood with a status dot (tone: ok | warn | bad | idle) in the corner.
+ * A favicon is drawn outside the page, so token colours are resolved to their values here.
+ */
+export function favicon(mood = 'idle', tone = 'idle') {
+  const css = getComputedStyle(document.documentElement);
+  const svg = sock(mood, 64)
+    .replace(/ role="img" aria-label="[^"]*"/, ' xmlns="http://www.w3.org/2000/svg"')
+    .replace('</svg>', `<circle cx="86" cy="86" r="20" fill="var(--${tone})" stroke="var(--surface)" stroke-width="7"/></svg>`)
+    .replace(/var\((--[\w-]+)\)/g, (_, name) => css.getPropertyValue(name).trim() || '#000');
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}

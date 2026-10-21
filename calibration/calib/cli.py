@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from . import export, fit, metrics, models  # noqa: E402
 from .data import load_csv, save_csv  # noqa: E402
-from .sources import PROFILES, SerialSensorSource, SimulatedTunnel, list_ports  # noqa: E402
+from .sources import AUTO_PORT, PROFILES, SerialSensorSource, SimulatedTunnel, list_ports  # noqa: E402
 
 
 def _add_gt_args(p):
@@ -460,18 +460,18 @@ def cmd_serve(a):
 
     if a.replay:
         mode = "replay"
-    elif a.port or a.gt_cmd or a.gt_module or a.gt_port:
-        mode = "live"
-    else:
+    elif a.sim:
         mode = "sim"
-        if not a.sim:
-            ports = list_ports()
-            hint = ", ".join(p["device"] for p in ports) or "none found"
-            print(f"no --port given: starting the simulator (serial ports: {hint})")
+    else:
+        # The board is the truth: with no --port, wait for a Nucleo rather than play simulated data.
+        mode = "live"
+        if not a.port:
+            a.port = AUTO_PORT
+            print("no --port given: waiting for a Nucleo on USB (pass --sim for the simulator)")
     eng = Engine(mode, a.window, sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd, gt_module=a.gt_module,
                  gt_port=a.gt_port, gt_baud=a.gt_baud, gt_pressure=a.gt_pressure, replay=a.replay,
                  replay_speed=a.speed, profile=a.profile, seed=a.seed)
-    serve(eng, a.host, a.http_port, not a.no_browser)
+    serve(eng, a.host, a.http_port, not a.no_browser and not a.reopen, live_reload=a.live_reload)
 
 
 def main(argv=None):
@@ -480,15 +480,18 @@ def main(argv=None):
 
     p = sub.add_parser("ports", help="list serial ports"); p.set_defaults(fn=cmd_ports)
 
-    p = sub.add_parser("serve", help="live dashboard (sim if no ports given)")
+    p = sub.add_parser("serve", help="live dashboard (waits for the Nucleo; --sim for the simulator)")
     p.add_argument("--sim", action="store_true")
     p.add_argument("--profile", choices=PROFILES, default="steps"); p.add_argument("--seed", type=int)
-    p.add_argument("--port", help="Nucleo serial port"); p.add_argument("--baud", type=int, default=115200)
+    p.add_argument("--port", help="Nucleo serial port, or auto (default)"); p.add_argument("--baud", type=int, default=115200)
     _add_gt_args(p)
     p.add_argument("--replay", help="recorded CSV to play back"); p.add_argument("--speed", type=float, default=1.0)
     p.add_argument("--window", type=float, default=30.0, help="metrics/fit window, s")
     p.add_argument("--host", default="127.0.0.1"); p.add_argument("--http-port", type=int, default=8765)
-    p.add_argument("--no-browser", action="store_true"); p.set_defaults(fn=cmd_serve)
+    p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--live-reload", action="store_true", help="dev: reload open pages when dashboard files change")
+    p.add_argument("--reopen", action="store_true", help=argparse.SUPPRESS)  # restarted by the launcher: page is open
+    p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("record", help="headless session recording (same CSV + JSON as the dashboard)")
     p.add_argument("--port"); p.add_argument("--baud", type=int, default=115200); _add_gt_args(p)

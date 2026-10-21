@@ -37,3 +37,13 @@ jobs:
           python-version: "3.11"
       - run: pip install -r host/requirements.txt
       - run: pytest host -q
+
+  wiring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Wiring diagrams are valid circuits and match board_config.h
+        run: node scripts/check-wiring.mjs

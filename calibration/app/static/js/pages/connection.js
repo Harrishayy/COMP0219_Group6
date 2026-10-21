@@ -16,9 +16,11 @@ const PROFILE_LABELS = { steps: 'Steps 2–10 m/s', ramps: 'Ramps', mixed: 'Mixe
 export function chipState() {
   const t = store.tele;
   if (store.conn !== 'open') return { tone: 'bad', text: store.conn === 'connecting' ? 'Connecting…' : 'Server offline' };
-  if (store.source === 'sim') return { tone: 'ok', text: store.hasPitot ? 'Simulator' : 'Simulator · bench' };
+  if (store.source === 'sim') return { tone: 'warn', text: store.hasPitot ? 'Simulator' : 'Simulator · bench' };
   if (store.source === 'replay') return { tone: 'warn', text: 'Replaying a run' };
+  if (t.board_state === 'absent') return { tone: 'bad', text: 'No board' };
   if (!t.sensor_connected) return { tone: 'bad', text: 'Board disconnected' };
+  if (t.board_state === 'silent' || t.board_state === 'no_data') return { tone: 'bad', text: 'Board silent' };
   return { tone: t.sensor_hz > 190 ? 'ok' : 'warn', text: `Board · ${fixed(t.sensor_hz, 0)} Hz${store.hasPitot ? '' : ' · bench'}` };
 }
 
@@ -98,8 +100,8 @@ export function mountConnection() {
   store.on('ports', (m) => {
     const cur = m.sensor?.port || port.value;
     const ports = m.ports || [];
-    const guess = cur || ports.find((p) => /stm|stlink|usbmodem/i.test(`${p.device} ${p.description}`))?.device || '';
-    fill(port, h('option', { value: '' }, ports.length ? 'Choose a port' : 'No serial ports found'),
+    const guess = (store.tele.board_state === 'absent' ? 'auto' : cur) || ports.find((p) => /stm|stlink|usbmodem/i.test(`${p.device} ${p.description}`))?.device || '';
+    fill(port, h('option', { value: 'auto', selected: guess === 'auto' || !guess }, 'Auto-detect the Nucleo'),
       ports.map((p) => h('option', { value: p.device, selected: p.device === guess },
         p.description && p.description !== 'n/a' ? `${p.device} · ${p.description}` : p.device)));
     if (m.gt && store.source === 'serial' && GT_KINDS.some(([v]) => v === m.gt.kind)) {

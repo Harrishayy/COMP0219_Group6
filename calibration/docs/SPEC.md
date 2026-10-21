@@ -18,6 +18,9 @@ Matches `firmware/` exactly. Lines are newline terminated (`\r\n` tolerated), co
 | Header | `#cols,n,v,feature,rho,temp_c,pressure_pa` | printed on every `MODE D` and on `HDR`; names the debug columns (parse it, don't hard-code). The PC sends `MODE D`, `HDR`, `GET` after every (re)connect. |
 | Any `#` line | informational, never data | `#cal {json}`, `#ok name=value`, `#err reason`, `#env ...`, `#stats ...` |
 
+`#env` (reply to `ENV`): `#env t_fused=… sigma=… mcp9808=… sht40=… stts22h=… lps22df=… tmp36=… lm35=… lm35_v=… rh=…
+p=… rho=…`, `nan` for a missing sensor.
+
 Commands PC → Nucleo: `SET <name> <value>` (→ `#ok name=value` / `#err reason`, RAM only),
 `GET` (→ `#cal {json}` with every live param + method, build date, rho, temp), `MODE V|D`, `TARE`
 (load-cell zero, non-blocking), `HDR`, `ENV`, `STATS`, `HELP`. `#cal` `method` must be `drag_plate`; anything
@@ -133,8 +136,19 @@ Server → client JSON messages:
   `replace: false, decimated: 1` and are appended. telemetry also has `bad_lines, sensor_status, gt_status,
   sensor_connected, gt_connected, profile, auto_push, board, env` (`board` = last `#cal` JSON); `recording` is the
   file name or null. `env` is the board's last `ENV` reply, which the server requests every second (`#env` lines
-  are parsed, not logged): `{t_fused, sigma, mcp9808, sht40, stts22h, lps22df, tmp36, rh, p, rho, age_s}`, a
-  missing sensor is `null`; `env` is null until the first reply. The simulator answers `ENV` too.
+  are parsed, not logged): `{t_fused, sigma, mcp9808, sht40, stts22h, lps22df, tmp36, lm35, lm35_v, rh, p, rho,
+  age_s}` (`lm35_v` is the LM35 output in V, reported even when out of range), a missing sensor is `null`; `env`
+  is null until the first reply. The simulator answers `ENV` too.
+  `board_state` / `board_detail` say where the real board stands, so the dashboard never shows silence or the
+  simulator as data: `sim | replay | none | absent` (no Nucleo on USB, `--port auto`) `| closed` (cannot open the
+  port) `| opening | silent` (port open, no line for 2 s) `| no_data` (lines but no readings, e.g. `MODE V`)
+  `| streaming`, with a sentence for the operator in `board_detail`.
+- `telemetry` (every 0.5 s while no `frame` is sent: no board, a silent board): `{type, telemetry}`, the same
+  telemetry object as in `frame`. With no board plugged in, this is the only stream: no frames are invented.
+- `reload` (live reload, `calib serve --live-reload`, which `pnpm dev` passes): `{type, files: [names], css_only}`
+  when a file under `app/static/` or `docs/datasheets/` changes. Swap the stylesheets if `css_only`, else reload
+  the page. `hello` carries `server_id` (new on every restart) and `live_reload`: a page that sees `server_id`
+  change with `live_reload` on reloads too, which picks up Python changes after the launcher restarts the server.
 - `metrics` (~2 Hz): `{type, window_s, est: {...metrics, steps: {rise_est_s, rise_gt_s, delay_t90_ms, overshoot_pct}, bands: [{band, n, bias, sigma, rmse}]}, dev: {...metrics}|null, diagnosis: [{id, severity: "high"|"medium"|"info", title, why, action, apply: {name: value}|null, gain: number|null}]}`.
   `diagnosis` is §4's rules on the metrics window with the PC preview; send `apply` back as `set_params` to act on one.
 - `fit_result`: `{type, method, params, previous, before, after, free, n, ok, message, elapsed_s, window_s}`.
@@ -171,7 +185,7 @@ Client → server:
   `TARE` (via `command`) zeroes the load cell at the current force, like the board; the server sends `GET`
   0.6 s after any `TARE` so the new `lc_offset` comes back in `#cal`.
 - `{type:"ports"}` → `ports`
-- `{type:"connect", source: "sim"|"serial"|"replay", sensor_port?, baud?, gt_kind?: "cmd"|"module"|"port"|"none",
+- `{type:"connect", source: "sim"|"serial"|"replay", sensor_port? ("auto": wait for and follow the first ST-LINK port), baud?, gt_kind?: "cmd"|"module"|"port"|"none",
   gt_value?, gt_baud?, gt_pressure?, replay_file?, speed?, profile?, seed?}` — switch data sources without
   restarting. The old sources stop, any recording is finalised (its closing `session` message is broadcast),
   buffers reset, params are kept, then a fresh `hello` goes to all clients. `serial` needs a

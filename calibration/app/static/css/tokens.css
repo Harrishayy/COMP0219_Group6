@@ -57,6 +57,31 @@
   --s-5: #B8862B;
   --grid: #13202A14;          /* chart gridlines */
 
+  /* Wiring drawings: jumper colours follow the bench convention (red supply, black ground) */
+  --wire-red: #D1342B;
+  --wire-black: #23272B;
+  --wire-yellow: #E8B71A;
+  --wire-blue: #2463D6;
+  --wire-green: #2E8B4A;
+  --wire-orange: #E0702A;
+  --wire-white: #F4F4F0;
+  --wire-edge: #13202A99;     /* outline so a wire reads on any ground */
+  --bb-body: #F3F1EA;         /* breadboard plastic */
+  --bb-channel: #E4E1D7;      /* centre channel */
+  --bb-hole: #B9B5A8;
+  --bb-rail-pos: #C2332B;
+  --bb-rail-neg: #2463D6;
+  --pcb: #FBFBF8;             /* Nucleo board (white solder mask) */
+  --pcb-shield: #DCE4EE;      /* IKS4A1 on the Arduino headers */
+  --pcb-part: #1F3A63;        /* sensor breakout */
+  --on-pcb: #F8F9F6;
+  --pin: #A7ADB2;
+  --pin-gold: #D9B45A;
+  --lead: #8B9096;
+  --part-body: #23272B;
+  --part-resistor: #D8C49A;
+  --part-cap: #E7A43A;
+
   /* Type */
   --font-display: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
   --font: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;

@@ -7,14 +7,21 @@ calibration bench is for and its design principles are in `PRODUCT.md`.
 ## Run it
 
 ```bash
-pnpm dev          # calibration dashboard on the simulator (creates .venv and installs on first run)
-pnpm dev:board    # dashboard on the Nucleo; BENCH_PORT=/dev/… to choose; extra args go to `calib serve`
-pnpm test         # calibration tests
+pnpm dev          # dashboard on the Nucleo; with none plugged in it says so and waits (creates .venv on first run)
+pnpm dev:sim      # dashboard on the simulator; every page says the readings are synthetic
+pnpm test         # calibration tests + wiring circuit check (pnpm check:wiring alone)
 cd firmware && pio run -e airspeed_drag_plate -t upload   # flash the competition build
 ```
 
-`pnpm` only starts the Python server (`scripts/bench.mjs`); there is no JavaScript build. If port 8765 is
-busy it picks the next free one, so check the printed URL.
+`pnpm` only starts the Python server (`scripts/bench.mjs`); there is no JavaScript build. `BENCH_PORT=/dev/…`
+picks the port; extra args go to `calib serve`. The board is never replaced by the simulator silently: no board
+means a "No Nucleo found" banner and dashes, not data. If port 8765 is busy it picks the next free one, so
+check the printed URL.
+
+Live reload: with `pnpm dev`, saving a dashboard file updates the open page (CSS in place, JS/HTML by reloading
+on the same tab and scroll position) and saving a toolkit `.py` restarts the server, after which the page reloads.
+Step progress kept in a sensor module resets on a reload. Firmware still needs `pio run … -t upload`.
+`BENCH_RELOAD=0 pnpm dev` turns it off.
 
 ## Directories
 
@@ -32,7 +39,9 @@ busy it picks the next free one, so check the printed URL.
 | `calibration/app/static/` | Dashboard UI | Plain ES modules, no build. One file per sensor in `js/sensors/`. Its own guide: `calibration/app/static/CLAUDE.md` |
 | `calibration/tests/` | Toolkit tests | Chain mirror vs a literal port of the C++, fits, parser, sessions, websocket smoke tests |
 | `host/` | Older stand-alone tools | Log, check the 200 Hz stream, live plot, score against ground truth, density. `pytest host` |
-| `docs/` | Brief, wiring (`hardware.md`), calibration procedure | |
+| `docs/` | Brief, wiring (`hardware.md`), calibration procedure | `docs/datasheets/` PDFs, served at `/datasheets/` for the Datasheet tabs |
+| `calibration/app/static/js/wiring/` | Breadboard wiring diagrams | `nucleo.js` morpho pin map, `breadboard.js` netlist + circuit check, `render.js` the Wiring tab, `parts/*.js` one spec per part |
+| `scripts/check-wiring.mjs` | Wiring circuit check | Every spec traced as a circuit and its pins checked against `board_config.h` |
 | `data/` | Runs worth keeping | Raw logs in `data/logs/` are git-ignored; dashboard recordings go to `calibration/runs/` (ignored) |
 | `scripts/bench.mjs` | The `pnpm` launcher | venv and requirements, board port detection, free HTTP port |
 
@@ -41,6 +50,10 @@ busy it picks the next free one, so check the printed URL.
 **Add a sensor to the dashboard.** Copy `calibration/app/static/js/sensors/_template.js`, fill it in, add one
 line to `js/sensors/index.js`. No CSS or layout code. If the firmware does not read the part yet, give it
 `available: () => ({ live: false, … })` and an `info` block so its tab shows the reference and bench test.
+
+**Add a wiring diagram or datasheet to a sensor tab.** Use the `wiring-diagram` skill
+(`.claude/skills/wiring-diagram/SKILL.md`): a spec in `calibration/app/static/js/wiring/parts/`, the PDF in
+`docs/datasheets/`, then `pnpm check:wiring`.
 
 **Change how the dashboard looks.** Colours, fonts, sizes, spacing: `calibration/app/static/css/tokens.css`
 only. A component's shape: `css/app.css`, using tokens. Layout every sensor shares:
