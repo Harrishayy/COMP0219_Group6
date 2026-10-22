@@ -1,4 +1,5 @@
-// Load cell: NAU7802 (Qwiic Scale) with a 1 kg bar cell. The board streams force F in newtons,
+// Load cell: a bar cell behind the M5Stack Weight I2C unit (HX711) or the SparkFun Qwiic Scale (NAU7802), whichever
+// the firmware finds on I²C; its GET reply names it (lc_frontend). The board streams force F in newtons,
 // F = (counts − lc_offset) × lc_n_per_count; TARE sets lc_offset, the known-mass step sets lc_n_per_count.
 import { h } from '../core/dom.js';
 import { fixed, signed, smart, isNum } from '../core/format.js';
@@ -19,6 +20,16 @@ const CELL = {
 const expectedScale = (r) => (CELL.capacityG / 1000 * GRAVITY) / (r * 1e-3 * CELL.gain * CELL.adcFullScale);
 const SCALE_RANGE = [expectedScale(CELL.ratedMvPerV[1]), expectedScale(CELL.ratedMvPerV[0])];
 
+// The two amplifiers the firmware can find (firmware/lib/drivers/src/load_cell.cpp). Both are gain 128 and
+// ratiometric, so SCALE_RANGE fits either. `zero` is the raw reading for no bridge signal: the Weight unit reports
+// HX711 counts offset by 2^23 (it rests at about 8 390 000 with nothing on the bridge).
+const FRONTENDS = {
+  weight_i2c: { name: 'M5Stack Weight I2C', chip: 'HX711', addr: '0x26', sps: 10, zero: 2 ** 23 },
+  nau7802: { name: 'Qwiic Scale', chip: 'NAU7802', addr: '0x2A', sps: 320, zero: 0 },
+};
+const frontendId = (s) => s.tele.board?.lc_frontend;
+const frontend = (s) => FRONTENDS[frontendId(s)] || null;
+
 // Progress kept while the tab is closed (the page object is rebuilt, this module is not).
 const S = { taredAt: null, rows: [], result: null, scaledAt: null, lastScale: null, verify: null };
 
@@ -30,11 +41,12 @@ function diffs(s, sec) {
   const b = s.buf, f = b.col('feature'), out = [];
   for (let i = Math.max(1, b.since(sec)); i < b.n; i++) {
     const d = f[i] - f[i - 1];
-    if (Number.isFinite(d)) out.push(Math.abs(d));
+    // A slow amplifier (Weight I2C, 10 SPS) repeats its last value between conversions: skip the repeats.
+    if (Number.isFinite(d) && d !== 0) out.push(Math.abs(d));
   }
   return out.sort((a, c) => a - c);
 }
-const noiseG = (s) => { const d = diffs(s, 2); return d.length > 20 ? toG((1.4826 / Math.SQRT2) * d[d.length >> 1]) : NaN; };
+const noiseG = (s) => { const d = diffs(s, 3); return d.length > 12 ? toG((1.4826 / Math.SQRT2) * d[d.length >> 1]) : NaN; };
 // The load changed in the last 30 s if any single step is far above the noise.
 const loadChanged = (s) => { const d = diffs(s, 30); return d.length > 20 && d[d.length - 1] > 25 * Math.max(d[d.length >> 1], 1e-9); };
 const driftG = (s) => (loadChanged(s) ? NaN : toG(s.buf.stats('feature', 3).mean - s.buf.stats('feature', 3, 27).mean));
@@ -66,6 +78,7 @@ function streamProblem(s) {
   if (s.conn !== 'open') return { title: 'Calibration server not reachable', detail: 'Start it with `python -m calib serve` in calibration/, then reload this page.' };
   if (!s.streaming) return { title: 'No readings from the board', detail: 'Open Connection (top right), pick the Nucleo port and connect, or start the simulator.', modeD: false };
   if (!hasForce(s)) return { title: 'The stream has no force column', detail: 'The board is not sending debug rows. Send MODE D; if that does not help, flash the airspeed_drag_plate build.', modeD: true };
+  if (frontendId(s) === 'none') return { title: 'No load-cell amplifier on I²C', detail: 'The board found neither the Weight I2C unit (0x26) nor the Qwiic Scale (0x2A), so force reads 0. Check the Grove/Qwiic cable to D14/D15; the board looks for the Weight unit again every 2 s.' };
   return null;
 }
 
@@ -225,7 +238,7 @@ const verifyStep = {
 export default {
   id: 'load-cell',
   title: 'Load cell',
-  part: `NAU7802 Qwiic Scale · ${CELL.capacityG / 1000} kg bar cell · gain ${CELL.gain}, 320 samples/s`,
+  part: `${CELL.capacityG / 1000} kg bar cell · M5Stack Weight I2C (HX711, 10 samples/s) or Qwiic Scale (NAU7802, 320 samples/s), whichever is plugged in`,
   intro: 'Measures the drag force on the plate. Zero it, scale it with known masses, then check it with one more.',
   allClear: 'Readings are steady and the scale is plausible for this cell.',
 
@@ -241,12 +254,15 @@ export default {
   readouts: [
     { label: 'Load', unit: 'g', digits: 1, value: loadG, note: (s) => (hasForce(s) ? `${fixed(s.buf.stats('feature', 0.5).mean, 4)} N` : '') },
     {
-      label: 'Noise (σ, 2 s)', unit: 'g', digits: 2, value: noiseG,
+      label: 'Noise (σ, 3 s)', unit: 'g', digits: 2, value: noiseG,
       tone: (s) => { const n = noiseG(s); return !isNum(n) ? null : n > CELL.noiseBadG ? 'bad' : n > CELL.noiseWarnG ? 'warn' : null; },
       note: (s) => (fanOn(s) ? 'fan on: includes airflow' : ''),
     },
     { label: 'Drift (30 s)', unit: 'g', value: driftG, format: (v) => signed(v, 2), note: (s) => (loadChanged(s) ? 'paused: the load changed' : '') },
-    { label: 'Raw', unit: 'counts', value: rawCounts, format: (v) => (isNum(v) ? Math.round(v).toLocaleString('en-GB') : '–'), note: (s) => `scale ${smart(scale(s), 4)} N/count` },
+    {
+      label: 'Raw', unit: 'counts', value: rawCounts, format: (v) => (isNum(v) ? Math.round(v).toLocaleString('en-GB') : '–'),
+      note: (s) => { const f = frontend(s); return `${f ? `${f.chip} · ${f.sps}/s · ` : ''}scale ${smart(scale(s), 4)} N/count`; },
+    },
   ],
 
   views: [
@@ -267,8 +283,15 @@ export default {
     if (Math.abs(load) > CELL.capacityG) {
       out.push({ id: 'overload', level: 'bad', title: `Over capacity: ${fixed(load, 0)} g`, detail: `The cell is rated for ${CELL.capacityG} g. Remove the load before it deforms permanently.` });
     }
-    if (Math.abs(raw) > 0.95 * CELL.adcFullScale) {
+    const fe = frontend(s), signal = raw - (fe ? fe.zero : 0);
+    if (Math.abs(signal) > 0.95 * CELL.adcFullScale) {
       out.push({ id: 'saturated', level: 'bad', title: 'ADC is at full scale', detail: 'Raw counts are at the 24-bit limit, so the reading is clipped. Check the cell wiring (E+/E−/A+/A−) and that nothing is pressing on it.' });
+    } else if (fe && isNum(signal) && Math.abs(signal) < 3000 && !loadChanged(s)) {
+      // A connected bridge almost always sits thousands of counts off zero; an unconnected one reads the ADC's own zero.
+      out.push({
+        id: 'no-signal', level: 'warn', title: `Raw sits at the ${fe.chip}'s zero (${signed(signal, 0)} counts)`,
+        detail: 'This is what the amplifier reads with no bridge connected. If pressing the cell does not move Raw by thousands of counts, the cell is not reaching the amplifier: check the four wires are bare copper in the terminal (red E+, black E−, white A−, green A+) and not broken where they enter the bar.',
+      });
     }
     if (isNum(noise) && noise > CELL.noiseWarnG) {
       out.push({
@@ -300,16 +323,17 @@ export default {
   },
 
   info: {
-    summary: 'The bar cell is a strain-gauge bridge. The NAU7802 excites it from its own 3.3 V LDO and reads the bridge at gain 128, 320 samples/s; the firmware turns counts into newtons with F = (counts − offset) × scale. Tare sets the offset, known masses set the scale.',
+    summary: 'The bar cell is a strain-gauge bridge. The amplifier excites it and reads it at gain 128: the M5Stack Weight I2C unit (HX711) 10 times a second, or the Qwiic Scale (NAU7802) 320 times; the firmware uses whichever answers on I²C and holds the last reading between conversions. Either way F = (counts − offset) × scale: tare sets the offset, known masses set the scale. Swapping amplifiers changes both, so tare and scale again after a swap.',
     brief: 'SparkFun Qwiic Scale (NAU7802) and a strain-gauge load cell (the kit lists 5 kg; this rig uses a 1 kg cell, so drag at 2 m/s is a few millinewtons: lever ratio and tare discipline matter more than electronics).',
     source: 'Project brief · docs/hardware.md · firmware/lib/drivers/src/load_cell.cpp',
     parts: [
-      { name: 'NAU7802 (Qwiic Scale)', role: '24-bit bridge ADC', connect: 'I²C 0x2A · D14/D15', spec: 'Gain 128, 320 SPS, LDO 3.3 V' },
+      { name: 'M5Stack Weight I2C (default)', role: 'HX711 bridge ADC behind its own MCU', connect: 'I²C 0x26 · D14/D15', spec: 'Gain 128, 10 SPS; raw counts read, its filters bypassed' },
+      { name: 'NAU7802 (Qwiic Scale, alternative)', role: '24-bit bridge ADC', connect: 'I²C 0x2A · D14/D15', spec: 'Gain 128, 320 SPS, LDO 3.3 V' },
       { name: 'Bar load cell', role: 'Strain-gauge bridge', connect: 'E+ red, E− black, A+ green, A− white', spec: '1 kg; about 9.1e-6 N/count here' },
       { name: 'Drag plate', role: 'Turns airflow into force', connect: 'On the cell\'s free end', spec: 'F = ½ρ·Cd·A·v²' },
     ],
     test: [
-      'Run the I²C scan: the NAU7802 answers at 0x2A.',
+      'Run the I²C scan: the Weight I2C unit answers at 0x26 (or the NAU7802 at 0x2A).',
       'Empty cell: the reading is steady to well under 0.5 g after a tare.',
       'Hang 0, 200, 500 and 800 g: each reads within 0.5 %.',
       'Press gently and release: it returns to zero.',

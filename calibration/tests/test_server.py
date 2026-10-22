@@ -102,8 +102,10 @@ def test_board_states():
     assert eng.board_state(0.0, now)[0] == "silent"
     src.last_line_t = now - 0.1
     assert eng.board_state(0.0, now)[0] == "no_data"
-    src.data_rows = 10
-    assert eng.board_state(200.0, now)[0] == "streaming"
+    src.data_rows, src.last_data_t = 10, now - 0.4
+    assert eng.board_state(2.0, now)[0] == "streaming"  # 2 Hz (LAB2 firmware) is still streaming
+    src.last_data_t = now - 3
+    assert eng.board_state(0.0, now)[0] == "no_data"
 
 
 def test_sim_env_has_lm35():

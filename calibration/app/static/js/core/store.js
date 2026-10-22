@@ -6,7 +6,7 @@ export const FS = 200;
 export const GRAVITY = 9.80665;
 const BUFFER_S = 150;
 const ENV_HISTORY_S = 15 * 60;
-const STREAM_KEYS = ['t', 'gt', 'est', 'dev', 'feature', 'rho', 'temp_c', 'pressure_pa'];
+const STREAM_KEYS = ['t', 'gt', 'est', 'dev', 'feature', 'rho', 'temp_c', 'pressure_pa', 'lab_raw', 'lab_weight'];
 
 /** Column store of the 200 Hz stream with a fixed capacity (oldest quarter dropped when full). */
 class Buffer {
@@ -107,7 +107,13 @@ class Store extends EventTarget {
   // ---- derived values used by several pages
   get env() { return this.tele.env || null; }
   get isSim() { return this.source === 'sim'; }
-  get streaming() { return this.conn === 'open' && this.tele.sensor_hz > 1; }
+  /** Readings are arriving: the server's board_state when it sends one (a 2 Hz board counts), else the rate. */
+  get streaming() {
+    if (this.conn !== 'open') return false;
+    const b = this.tele.board_state;
+    if (b && b !== 'sim' && b !== 'replay') return b === 'streaming';
+    return this.tele.sensor_hz > 1;
+  }
   get hasPitot() { return this.tele.gt_hz > 1; }
   /** sim | replay | none | absent | closed | opening | silent | no_data | streaming (server's board_state). */
   get boardState() {
@@ -225,6 +231,7 @@ function onMessage(m) {
         b.push({
           t: m.t[i], gt: m.gt?.[i], est: m.est?.[i], dev: m.dev?.[i], feature: raw.feature?.[i],
           rho: raw.rho?.[i], temp_c: raw.temp_c?.[i], pressure_pa: raw.pressure_pa?.[i],
+          lab_raw: raw.lab_raw?.[i], lab_weight: raw.lab_weight?.[i],
         });
       }
       if (m.telemetry) {
@@ -298,7 +305,9 @@ function trackEnv(env) {
 export const actions = {
   log: addLog,
   command(line) {
-    if (send({ type: 'command', line })) addLog('info', `> ${line}`);
+    const sent = send({ type: 'command', line });
+    if (sent) addLog('info', `> ${line}`);
+    return sent;
   },
   setParam(name, value) {
     store.params[name] = value;  // optimistic, the server echoes the clamped value

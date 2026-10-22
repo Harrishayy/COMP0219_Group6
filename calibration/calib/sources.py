@@ -165,7 +165,94 @@ class SerialSensorSource(Source):
         self.lines = 0
         self.data_rows = 0
         self.last_line_t: float | None = None  # perf_counter of the last line, for "port open but silent"
+        self.last_data_t: float | None = None  # perf_counter of the last reading: "streaming" means one arrived lately
         self.opened_t: float | None = None
+        self.loadcell_lab: dict | None = None
+        self._lab_lock = threading.RLock()
+        self._lab_sequences = {"tare_seq": 0, "calibration_seq": 0, "error_seq": 0}
+
+    def _reset_lab(self, detected: bool = True):
+        """Calibration is volatile on the board; acknowledgement ids never go backwards."""
+        with self._lab_lock:
+            self.loadcell_lab = ({"raw_counts": None, "weight_g": None, "tared": False,
+                                  "calibrated": False, "scale_factor": None, "zero_offset": None,
+                                  "last_error": None, **self._lab_sequences} if detected else None)
+
+    def _lab_error(self, message: str):
+        with self._lab_lock:
+            self._lab_sequences["error_seq"] += 1
+            if self.loadcell_lab is not None:
+                self.loadcell_lab = {**self.loadcell_lab, "last_error": message, **self._lab_sequences}
+
+    def _handle_lab(self, t: float, text: str) -> bool:
+        """Adapt the standalone LAB2 firmware without inventing airspeed/force columns."""
+        with self._lab_lock:
+            return self._parse_lab(t, text)
+
+    def _parse_lab(self, t: float, text: str) -> bool:
+        startup = text.startswith(("LAB2 load cell:", "NAU7802 initialized."))
+        recognized = startup or text.startswith(("Raw:", "Weight:", "Tare:", "Calibration:",
+                                                "Scale factor:", "Commands: t =", "Calibration lives in RAM"))
+        if startup or (recognized and self.loadcell_lab is None):
+            self._reset_lab()
+        if self.loadcell_lab is None:
+            return False
+        state = dict(self.loadcell_lab)
+        # Full matches prevent truncated lines and non-finite values from reaching the UI.
+        num = _FLOAT_RE.pattern
+        raw = re.fullmatch(r"Raw:\s*([-+]?\d+) counts \(uncalibrated\)", text)
+        weight = re.fullmatch(rf"Weight:\s*({num}) g\s+Raw:\s*([-+]?\d+)", text)
+        tare = re.fullmatch(r"Tare:\s*([-+]?\d+) counts", text)
+        cal = re.fullmatch(rf"Calibration:\s*({num}) counts/g", text)
+        status = re.fullmatch(rf"Scale factor:\s*({num}) counts/g; tared=([01]); calibrated=([01])", text)
+        if raw or weight:
+            value = float(weight[1]) if weight else None
+            counts = float(weight[2] if weight else raw[1])
+            if not math.isfinite(counts) or (value is not None and not math.isfinite(value)):
+                return True
+            if raw and state["calibrated"]:
+                self._reset_lab()
+                state = dict(self.loadcell_lab)
+            state.update(raw_counts=int(counts), weight_g=value, calibrated=bool(weight))
+            if weight:
+                state["tared"] = True
+            self.loadcell_lab = state
+            self.data_rows, self.last_data_t = self.data_rows + 1, t
+            self.on_sensor(t, {"lab_raw": counts, "lab_weight": value if weight else math.nan})
+            return True
+        if tare:
+            counts = float(tare[1])
+            if not math.isfinite(counts):
+                return True
+            self._lab_sequences["tare_seq"] += 1
+            state.update(tared=True, zero_offset=int(counts), weight_g=None, last_error=None,
+                         **self._lab_sequences)
+        elif cal or status:
+            factor = float((cal or status)[1])
+            if not math.isfinite(factor) or factor == 0:
+                return True
+            state["scale_factor"] = factor
+            if cal:
+                self._lab_sequences["calibration_seq"] += 1
+                state.update(tared=True, calibrated=True, weight_g=None, last_error=None,
+                             **self._lab_sequences)
+            else:
+                state.update(tared=status[2] == "1", calibrated=status[3] == "1")
+                if not state["calibrated"]:
+                    state["weight_g"] = None
+                if not state["tared"]:
+                    state["zero_offset"] = None
+        elif text.startswith(("ERROR:", "First remove", "Use k ")):
+            if "reconnecting sensor" in text:
+                self._reset_lab()
+            self._lab_error(text)
+            self.on_info(text)
+            return True
+        elif not recognized:
+            return False
+        self.loadcell_lab = state
+        self.on_info(text)
+        return True
 
     def _run(self):
         import serial  # pyserial; imported lazily so sim mode works without it
@@ -181,8 +268,13 @@ class SerialSensorSource(Source):
                 self.port = found
             try:
                 self.status = f"opening {self.port}"
-                # write_timeout: a board that stops reading must not hang this thread on a full buffer
-                with serial.Serial(self.port, self.baud, timeout=0.2, write_timeout=0.5) as ser:
+                # write_timeout: a board that stops reading must not hang this thread on a full buffer.
+                # exclusive: a second dashboard (or a monitor that locks) gets "busy" instead of splitting the
+                # byte stream with this one, which garbles lines and makes both reconnect over and over.
+                with serial.Serial(self.port, self.baud, timeout=0.2, write_timeout=0.5, exclusive=True) as ser:
+                    self._reset_lab(detected=False)
+                    self.parser = LineParser()
+                    self.data_rows, self.last_data_t = 0, None
                     self._ser = ser
                     self.connected, self.status, backoff = True, f"connected {self.port}", 0.5
                     self.opened_t, self.last_line_t = time.perf_counter(), None
@@ -204,7 +296,9 @@ class SerialSensorSource(Source):
                         for ln in lines:
                             self._handle(t, ln)
             except Exception as e:
-                self.status = f"disconnected: {e}"
+                busy = isinstance(e, serial.SerialException) and ("lock" in str(e).lower() or "busy" in str(e).lower())
+                self.status = ("in use by another program (another dashboard or serial monitor): close it"
+                               if busy else f"disconnected: {e}")
             finally:
                 self._ser, self.connected = None, False
             self._stop.wait(backoff)
@@ -213,12 +307,17 @@ class SerialSensorSource(Source):
     def _handle(self, t, ln):
         self.lines += 1
         self.last_line_t = t
+        text = ln.decode("ascii", "replace").strip().strip("\x00") if isinstance(ln, bytes) else str(ln).strip().strip("\x00")
+        if self._handle_lab(t, text):
+            return
         r = self.parser.parse(ln)
         if r is None:
             return
         kind = r[0]
+        if kind in ("v", "d", "cols", "cal"):
+            self._reset_lab(detected=False)
         if kind in ("v", "d"):
-            self.data_rows += 1
+            self.data_rows, self.last_data_t = self.data_rows + 1, t
         if kind == "v":
             self.on_sensor(t, {"v": r[1]})
         elif kind == "d":
@@ -234,9 +333,20 @@ class SerialSensorSource(Source):
         ser = self._ser
         if ser is None:
             return False
+        line = line.strip()
+        if self.loadcell_lab is not None:
+            if line.upper() in ("MODE D", "HDR", "ENV"):
+                return True
+            if line.upper() == "GET":
+                line = "h"
+            elif not (line in ("t", "h") or line.startswith("k ")):
+                error = f"Command unavailable in load-cell lab firmware: {line}"
+                self._lab_error(error)
+                self.on_info(f"#err {error}")
+                return False
         try:
             with self._tx_lock:
-                ser.write((line.strip() + "\n").encode("ascii"))
+                ser.write((line + "\n").encode("ascii"))
             return True
         except Exception as e:
             self.status = f"write failed: {e}"

@@ -22,13 +22,35 @@ Matches `firmware/` exactly. Lines are newline terminated (`\r\n` tolerated), co
 p=… rho=…`, `nan` for a missing sensor.
 
 Commands PC → Nucleo: `SET <name> <value>` (→ `#ok name=value` / `#err reason`, RAM only),
-`GET` (→ `#cal {json}` with every live param + method, build date, rho, temp), `MODE V|D`, `TARE`
+`GET` (→ `#cal {json}` with every live param + method, build date, rho, temp, and on the drag plate
+`lc_frontend` (`weight_i2c` | `nau7802` | `none`) and `lc_sps` (its conversions per second)), `MODE V|D`, `TARE`
 (load-cell zero, non-blocking), `HDR`, `ENV`, `STATS`, `HELP`. `#cal` `method` must be `drag_plate`; anything
 else is logged as an error (flash the drag-plate build).
 
 Firmware param names (also the export keys; header macro is `CAL_<UPPER_NAME>`):
 `sqrt_k`, `sqrt_x0`, `lc_offset`, `lc_n_per_count`, `lead_tau`, `filter_kind`, `ema_alpha`, `lpf_hz`.
 Method is compile-time (`AIRSPEED_METHOD = METHOD_DRAG_PLATE`).
+
+### Standalone load-cell lab firmware
+
+`labs/loadcell` uses its own human-readable protocol at the same 115200 baud. The serial source
+detects its startup/help text or a `Raw: N counts (uncalibrated)` / `Weight: G g  Raw: N` line.
+These samples appear only as `frame.raw.lab_raw` (counts) and `frame.raw.lab_weight` (grams,
+`null` until calibrated); they never supply a force feature, velocity, or computed airspeed.
+`telemetry.loadcell_lab` is `null` for other sources, otherwise it contains `raw_counts`, `weight_g`,
+`tared`, `calibrated`, `scale_factor` (counts/g), `zero_offset` (counts), `tare_seq`,
+`calibration_seq`, `error_seq`, and `last_error`. Unknown values are `null`.
+
+The website sends `t` unloaded, then `k <positive known grams>` with that mass applied. Success
+requires the board's `Tare: N counts` or `Calibration: F counts/g` acknowledgement, tracked through
+the respective monotonic sequence counters. `ERROR: ...`, `First remove ...`, and `Use k ...`
+rejections increment `error_seq` and expose their reason in `last_error`; informational replies also
+reach the log. `h` requests help/status (`Scale factor: F counts/g; tared=0|1; calibrated=0|1`).
+`GET` maps to `h`, `MODE D`/`HDR`/`ENV` are harmless no-ops after detection, and unsupported
+competition commands are rejected locally. Opening an unknown board retains the competition
+startup probes until its protocol is identified. Calibration is RAM-only: reconnect, startup,
+sensor reinitialization, or a return from calibrated weights to uncalibrated raw output clears
+calibration and latest weight. Sequence counters remain monotonic for each serial-source instance.
 
 ## 2. Ground truth adapter
 

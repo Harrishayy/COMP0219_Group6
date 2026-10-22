@@ -11,9 +11,17 @@ import { mountConnection } from './pages/connection.js';
 import { duration } from './core/format.js';
 import sensors from './sensors/index.js';
 import runs from './pages/runs.js';
+import loadCellLab from './sensors/load-cell-lab.js';
+
+function sensorDef(def) {
+  if (!store.tele.loadcell_lab) return def;
+  if (def.id === 'load-cell') return loadCellLab;
+  return { ...def, available: () => ({ live: false, title: 'Load-cell lab firmware is running',
+    detail: 'This firmware reads the load cell. Open the Load cell tab for live readings and calibration.', commands: [] }) };
+}
 
 const pages = [
-  ...sensors.map((def) => ({ id: def.id, title: def.title, def, mount: (root) => mountSensorPage(root, def, { onSub: (sub) => setHash(def.id, sub) }) })),
+  ...sensors.map((def) => ({ id: def.id, title: def.title, get def() { return sensorDef(def); }, mount: (root) => mountSensorPage(root, sensorDef(def), { onSub: (sub) => setHash(def.id, sub) }) })),
   { id: runs.id, title: runs.title, mount: (root) => runs.mount(root) },
 ];
 
@@ -171,6 +179,7 @@ store.on('hello', (m) => {
 // -------------------------------------------------------------------------------------------- loop
 const METHOD_LABEL = { drag_plate: 'drag plate', cup_hall: 'cup + Hall', cup_encoder: 'cup + encoder' };
 let lastChrome = 0, lastMood = '';
+let labMode = false;
 
 function mood() {
   if (!store.streaming) return 'idle';
@@ -183,6 +192,14 @@ function mood() {
 
 function loop(now) {
   requestAnimationFrame(loop);
+  const nextLabMode = !!store.tele.loadcell_lab;
+  if (nextLabMode !== labMode) {
+    labMode = nextLabMode;
+    for (const [id, m] of mounted) {
+      m.root.replaceChildren();
+      m.page = pages.find((p) => p.id === id).mount(m.root);
+    }
+  }
   const m = mounted.get(current);
   if (m) {
     try { m.page.update(now); } catch (e) { console.error(e); }
@@ -203,7 +220,7 @@ function loop(now) {
     updateBanner();
     updateIcon(md);
     const method = store.tele.method || store.boardMethod;
-    setText(context, `Nucleo-F411RE${METHOD_LABEL[method] ? ' · ' + METHOD_LABEL[method] : ''}`);
+    setText(context, `Nucleo-F411RE${labMode ? ' · load-cell lab' : METHOD_LABEL[method] ? ' · ' + METHOD_LABEL[method] : ''}`);
     const rec = store.session?.recording;
     recChip.hidden = !rec;
     if (rec) setText(recChip.children[1], `Recording ${duration(store.session.elapsed_s)}`);

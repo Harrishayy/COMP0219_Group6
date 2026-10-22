@@ -36,11 +36,12 @@ SERVER_ID = uuid.uuid4().hex[:12]  # a new id after every restart: a page that s
 LIVE_RELOAD = {"on": False}        # set by serve(live_reload=True), i.e. `pnpm dev`
 DATASHEETS = Path(__file__).resolve().parents[2] / "docs" / "datasheets"  # served at /datasheets for the UI
 FRAME_HZ, METRICS_HZ = 20.0, 2.0
-RAW_SEND = ("feature", "rho", "temp_c", "pressure_pa")
+RAW_SEND = ("feature", "rho", "temp_c", "pressure_pa", "lab_raw", "lab_weight")
 REPLACE_WINDOW_S, REPLACE_DECIM = 60.0, 1  # full rate so the dashboard can re-run the exact 200 Hz chain
 ENV_POLL_S = 1.0  # `ENV` request period: per-thermometer, humidity and pressure readings for the dashboard
 TELEMETRY_IDLE_S = 0.5  # with no frames (no board, silent board) telemetry is still sent this often
 SILENT_AFTER_S = 2.0  # an open port with no line for this long is a silent board
+STALE_DATA_S = 2.0  # streaming = a reading within this long (the LAB2 firmware sends only 2 per second)
 
 
 class FileWatcher:
@@ -451,7 +452,7 @@ class Engine:
             self.info.append(f"#err no board connected; not sent: {line}")
             return False
         ok = src.send_command(line)
-        self.info.append(f"> {line}" if ok else f"#err not sent (port closed): {line}")
+        self.info.append(f"> {line}" if ok else f"#err command failed: {line}")
         if ok and line.strip().upper() == "TARE":
             # TARE is non-blocking on the board: read the new zero back once it has settled
             threading.Timer(0.6, lambda: src.send_command("GET")).start()
@@ -576,6 +577,7 @@ class Engine:
             "profile": self.sim.profile if self.sim else None,
             "auto_push": self.auto_push,
             "board": self.board_cal,
+            "loadcell_lab": getattr(self.sensor_src, "loadcell_lab", None),
             "env": ({**{k: v for k, v in self.env.items() if k != "t"},
                      "age_s": time.perf_counter() - self.env["t"]} if self.env else None),
         })
@@ -605,7 +607,8 @@ class Engine:
             return "silent", f"{src.port} is open but the board sends nothing"
         if src.last_line_t is None:
             return "opening", f"Opened {src.port}, waiting for the board"
-        if not src.data_rows or not hz or hz < 1:
+        last_data = getattr(src, "last_data_t", None)
+        if not src.data_rows or last_data is None or now - last_data > STALE_DATA_S:
             return "no_data", f"The board on {src.port} answers but streams no readings"
         return "streaming", f"Streaming from {src.port}"
 
@@ -769,7 +772,7 @@ def create_app(engine: Engine) -> FastAPI:
                         await broadcast(m)
                 while engine.info:
                     line = engine.info.popleft()
-                    lvl = "error" if line.startswith("#err") else "info"
+                    lvl = "error" if line.startswith(("#err", "ERROR:")) else "info"
                     await broadcast({"type": "log", "level": lvl, "msg": line})
                     if line.startswith("#cal"):  # board values changed (push, TARE, reconnect): resync the dashboard
                         await broadcast(engine.params_msg())

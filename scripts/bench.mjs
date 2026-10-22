@@ -133,5 +133,6 @@ else if (cmd === 'sim') await serve(false, extra);
 else if (cmd === 'test') {
   ensurePython();
   run(PY, ['-m', 'pytest', '-q', ...extra], { cwd: CAL });
+  run(process.execPath, ['--test', join(CAL, 'tests/load-cell-lab.test.mjs')]);
   run(process.execPath, [join(ROOT, 'scripts/check-wiring.mjs')]);
 } else fail(`unknown command ${cmd}: use dev, board, sim or test`);
