@@ -32,7 +32,7 @@ Step progress kept in a sensor module resets on a reload. Firmware still needs `
 | `firmware/src/apps/` (others) | Bench tools | `i2c_scan`, `env_monitor`, `loadcell_test`, `encoder_test`, `hall_test`: flash, then `pio device monitor` |
 | `firmware/include/` | Configuration | `board_config.h`: pins, I²C addresses, rates. `calibration.h`: defaults for every `CAL_*`; `calibration_generated.h` (written by the toolkit) overrides them |
 | `firmware/lib/airmath/` | Pure C++ maths | Density, temperature fusion, models, filters. Unit-tested natively (`pio test -e native`) |
-| `firmware/lib/drivers/` | Sensor drivers | NAU7802, MCP9808, SHT40, IKS4A1 env (`env_sensors.cpp`), TMP36, encoder, Hall |
+| `firmware/lib/drivers/` | Sensor drivers | Load cell (`load_cell.cpp`: M5Stack Weight I2C or NAU7802, found at runtime), MCP9808, SHT40, IKS4A1 env (`env_sensors.cpp`), TMP36, LM35, encoder, Hall |
 | `calibration/` | Calibration toolkit (Python) and dashboard | `python -m calib <cmd>`; protocol and file formats in `calibration/docs/SPEC.md` |
 | `calibration/calib/` | Toolkit package | `sources.py` serial, pitot and simulator streams; `models.py` the firmware chain mirrored in numpy and every parameter's spec; `fit.py` curve and response fits; `metrics.py` scores and diagnosis; `recorder.py` sessions; `export.py` JSON, C header, SET script; `cli.py` commands |
 | `calibration/app/server.py` | Dashboard server | FastAPI + one websocket. Owns the serial port, runs the PC preview, fits, diagnosis, recording; serves `app/static/` |
@@ -84,6 +84,11 @@ plus a row in the command table in `calibration/README.md`.
 - Sensors are tested on the open bench and in the tunnel. Nothing that needs airflow or the pitot may block
   a bench step; such steps return `{ tone: 'skip' }`.
 - Pins and addresses live in `board_config.h` and `docs/hardware.md`, never in app code.
+- When a sensor or the stream misbehaves, check the STM32 software side first and follow ST's documented way of
+  doing things (the STM32duino core and STM32 HAL as ST and the library authors describe them), before blaming
+  wiring. Clean-reinstall the libraries and rebuild:
+  `cd firmware && rm -rf .pio/libdeps/<env> .pio/build/<env> && pio pkg install -e <env> && pio run -e <env> -t upload`.
+  Cross-check with a build on another stack (the STM32 HAL program in `labs/loadcell/`) when in doubt.
 - Commits: imperative sentence-case subject ("Add …", "Make …"), body explains why. No AI co-author trailers.
 
 ## Check a change
