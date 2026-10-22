@@ -14,7 +14,7 @@ Change them there, not in the apps.
 
 | Signal                         | Nucleo pin             | Notes                                                        |
 | ------------------------------ | ---------------------- | ------------------------------------------------------------ |
-| I2C1 SDA / SCL                 | D14 (PB9) / D15 (PB8)  | IKS4A1 + Qwiic NAU7802 + MCP9808, 400 kHz                    |
+| I2C1 SDA / SCL                 | D14 (PB9) / D15 (PB8)  | IKS4A1 + load-cell amplifier (Weight I2C or NAU7802) + MCP9808, 400 kHz |
 | Encoder A / B (EM14)           | A0 (PA0) / A1 (PA1)    | TIM2 CH1/CH2, AF1, hardware x4 decoding                      |
 | TMP36 Vout                     | PC2 (CN7 pin 35)       | ADC1_IN12, VDDA measured via VREFINT                         |
 | LM35 Vout                      | PC3 (CN7 pin 37)       | ADC1_IN13; LM35 powered from 5V (CN7 pin 18), 100 kΩ Vout to GND |
@@ -32,7 +32,8 @@ and would fight an external signal.
 | ---------------------- | ------- | ---------------- |
 | LIS2DUXS12 accel       | 0x19    | IKS4A1 (unused)  |
 | LIS2MDL magnetometer   | 0x1E    | IKS4A1 (unused)  |
-| NAU7802 (Qwiic Scale)  | 0x2A    | SparkFun Qwiic   |
+| Unit Weight I2C (HX711)| 0x26    | M5Stack U177 (load cell, default) |
+| NAU7802 (Qwiic Scale)  | 0x2A    | SparkFun Qwiic (load cell, alternative) |
 | STTS22H temperature    | 0x38    | IKS4A1           |
 | SHT40 humidity/temp    | 0x44    | IKS4A1           |
 | LPS22DF pressure       | 0x5D    | IKS4A1           |
@@ -58,6 +59,17 @@ behind a sensor hub.
 - **Wiring diagrams**: the dashboard's Wiring tabs draw each part on a breadboard with the morpho pins, which
   stay reachable with the IKS4A1 fitted (jumpers need a female end). `pnpm check:wiring` checks them as circuits
   and against `board_config.h`. Morpho pin numbers are from ST UM1724; check them against the board silkscreen.
+- **Load-cell amplifier: Weight I2C (default) or NAU7802.** The firmware uses whichever answers on I²C
+  (`LoadCell::begin`, preference `kLoadCellPrefer` in `board_config.h` when both are plugged in), so swapping is a
+  re-plug, then tare and scale again: the two give different raw counts. `GET` reports it as `lc_frontend`.
+  The M5Stack Unit Weight I2C runs an HX711 behind its own MCU: 10 conversions/s (the 200 Hz stream holds each
+  for 20 ticks), raw counts offset by 2^23 (about 8 390 000 with no bridge signal), read from register 0x00; its
+  own tare, scale and filters (0x40–0x82) are not used. **Power it from 5V** (Nucleo 5V pin, CN6, or CN7 pin 18), not
+  3V3: its HX711 makes the cell's excitation from that supply and gives no bridge signal on 3.3 V. Its SDA/SCL go
+  to PB9/PB8, which are 5 V tolerant. Cell wires in its terminal: red E+, black E−, white A−,
+  green A+, each as bare copper. A raw reading that stays within a few thousand counts of the amplifier's zero
+  and does not move when the cell is pressed means the bridge is not connected (`bridge_probe` tests this on
+  the NAU7802).
 - **NAU7802 + 5 kg load cell**: 320 SPS at gain 128. With 3.3 V excitation, 5 kg full scale is only a
   few mV, and drag forces at 2 m/s are millinewtons. Mechanical lever ratio and tare discipline matter
   more than electronics here.

@@ -11,6 +11,7 @@ const char* guess(uint8_t addr) {
     case 0x18: return "MCP9808 (default) / LIS2DUXS12 (SA0=0)";
     case 0x19: return "LIS2DUXS12 (IKS4A1, unused)";
     case 0x1E: return "LIS2MDL magnetometer (IKS4A1, unused)";
+    case 0x26: return "M5Stack Unit Weight I2C (HX711 load cell)";
     case 0x2A: return "NAU7802 Qwiic Scale";
     case 0x38: return "STTS22H temperature (IKS4A1)";
     case 0x44: return "SHT40 humidity/temperature (IKS4A1)";

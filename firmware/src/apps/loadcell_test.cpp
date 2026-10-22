@@ -1,4 +1,4 @@
-// Load cell bench test and scale calibration (NAU7802 + 5 kg cell).
+// Load cell bench test and scale calibration (Weight I2C unit or NAU7802, whichever is plugged in).
 //
 //   t        tare: average the unloaded reading into the zero offset
 //   k <g>    put a known mass of <g> grams on the cell, then send e.g. "k 200"
@@ -32,8 +32,14 @@ void setup() {
   Serial.begin(board::kSerialBaud);
   Wire.begin();
   Wire.setClock(board::kI2cClockHz);
-  if (!g_cell.begin(Wire, static_cast<int32_t>(CAL_LC_OFFSET), CAL_LC_N_PER_COUNT)) {
-    Serial.println("# NAU7802 not found at 0x2A - check the Qwiic cable");
+  if (!g_cell.begin(Wire, board::load_cell_config(), static_cast<int32_t>(CAL_LC_OFFSET), CAL_LC_N_PER_COUNT)) {
+    Serial.println("# no load-cell amplifier at 0x26 (Weight I2C) or 0x2A (NAU7802) - check the cable");
+  } else {
+    Serial.print("# front end ");
+    Serial.print(g_cell.frontend_name());
+    Serial.print(", ");
+    Serial.print(g_cell.sample_hz(), 0);
+    Serial.println(" samples/s");
   }
   Serial.println("# commands: t (tare), k <grams> (scale with known mass)");
   Serial.println("#cols,t_ms,raw,force_n");
@@ -63,13 +69,13 @@ void loop() {
   if (Serial.available()) {
     char c = static_cast<char>(Serial.read());
     if (c == 't') {
-      g_cell.start_tare(320);
+      g_cell.start_tare(static_cast<uint16_t>(max(1.0f, g_cell.sample_hz())));
       Serial.println("# taring for 1 s...");
     } else if (c == 'k') {
       g_known_mass_g = Serial.parseFloat();
       if (g_known_mass_g > 0.0f) {
         g_avg_sum = 0;
-        g_avg_total = g_avg_left = 320;
+        g_avg_total = g_avg_left = static_cast<uint16_t>(max(1.0f, g_cell.sample_hz()));
         Serial.println("# averaging known mass for 1 s...");
       }
     } else if (c == 'p') {

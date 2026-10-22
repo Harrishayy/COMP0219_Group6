@@ -5,6 +5,7 @@
 #include <Arduino.h>
 
 #include "env_sensors.h"
+#include "load_cell.h"
 
 namespace board {
 
@@ -34,14 +35,25 @@ constexpr uint8_t kHallPulsesPerRev = 1;  // magnets on the rotor
 
 constexpr uint32_t kPinLed = LED_BUILTIN;  // LD2, PA5
 
+// bridge_probe only: A0 (PA0) as a voltmeter on a jumper. Shared with encoder A: unplug the encoder first.
+constexpr uint32_t kPinProbe = PA0;
+constexpr uint32_t kPinProbe2 = PA1;  // A1: a load cell's A- in the direct test (A+ on A0), encoder B otherwise
+
 // 7-bit I2C addresses. The ST libraries take their own (8-bit) defaults internally:
 // LPS22DF 0x5D, STTS22H 0x38. Other IKS4A1 parts (unused) sit at 0x19, 0x1E, 0x6A, 0x6B.
 constexpr uint8_t kAddrMcp9808 = 0x18;  // A2..A0 = 000; 0x19 would clash with the LIS2DUXS12
 constexpr uint8_t kAddrSht40 = 0x44;
 constexpr uint8_t kAddrNau7802 = 0x2A;  // fixed
+constexpr uint8_t kAddrWeightI2c = 0x26;  // M5Stack Unit Weight I2C (HX711), the default
+
+// Load-cell front end: whichever answers is used, so swapping the Weight unit for the Qwiic Scale is only a
+// re-plug. With both on the bus the one named here wins.
+constexpr LoadCellFrontend kLoadCellPrefer = LoadCellFrontend::kWeightI2c;
 
 // Environmental sensors refresh period. Density drifts over minutes, not milliseconds.
 constexpr uint32_t kEnvPeriodMs = 250;
+
+inline LoadCellConfig load_cell_config() { return LoadCellConfig{kAddrWeightI2c, kAddrNau7802, kLoadCellPrefer}; }
 
 inline EnvConfig env_config() {
   return EnvConfig{kPinTmp36, kPinLm35, kAddrMcp9808, kAddrSht40, kEnvPeriodMs};

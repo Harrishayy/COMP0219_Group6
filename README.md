@@ -24,7 +24,7 @@ firmware/                 PlatformIO project (Arduino core for STM32 + direct HA
   include/calibration.h   transducer selection + calibration constants (overridable, see below)
   src/apps/               entry points: airspeed (competition) + bench tools
   lib/airmath/            pure C++ maths: density, temperature fusion, models, filters (unit-tested)
-  lib/drivers/            sensor drivers: TMP36, MCP9808, SHT40, IKS4A1 env, NAU7802, encoder, Hall
+  lib/drivers/            sensor drivers: TMP36, MCP9808, SHT40, IKS4A1 env, load cell (Weight I2C / NAU7802), encoder, Hall
   test/                   native unit tests for lib/airmath
 host/                     Python tools: logging, stream check, live plot, evaluation, density
 calibration/              calibration toolkit + dashboard (pnpm dev; see calibration/docs/SPEC.md)
@@ -86,7 +86,8 @@ Working on the code with Claude: `CLAUDE.md` maps every directory and has recipe
 | `airspeed` / `airspeed_cup_hall`            | Same firmware for the dropped cup anemometer (encoder / Hall), kept building in CI |
 | `env_monitor`                               | All five thermometers, pressure, humidity, fused T and air density, 4 Hz CSV |
 | `i2c_scan`                                  | Lists I2C devices with the kit part each address belongs to                 |
-| `loadcell_test`                             | NAU7802 raw/force; `t` tares, `k 200` calibrates with a 200 g mass           |
+| `loadcell_test`                             | Load cell raw/force (Weight I2C or NAU7802); `t` tares, `k 200` calibrates with a 200 g mass |
+| `bridge_probe`                              | NAU7802 bridge check without a multimeter: channel and A0 voltage survey     |
 | `encoder_test`                              | EM14 count and rev/s from the TIM2 hardware decoder                         |
 | `hall_test`                                 | Hall switch edge count and rotation rate                                    |
 

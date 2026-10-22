@@ -130,8 +130,9 @@ void transducer_begin() {
 #elif AIRSPEED_METHOD == METHOD_CUP_HALL
   g_tacho.begin(board::kPinHallDigital, board::kHallPulsesPerRev);
 #elif AIRSPEED_METHOD == METHOD_DRAG_PLATE
-  if (!g_load_cell.begin(Wire, static_cast<int32_t>(g_params.lc_offset), g_params.lc_n_per_count)) {
-    Serial.println("#err NAU7802 not found at 0x2A: force will read 0");
+  if (!g_load_cell.begin(Wire, board::load_cell_config(), static_cast<int32_t>(g_params.lc_offset),
+                         g_params.lc_n_per_count)) {
+    Serial.println("#err no load-cell amplifier (Weight I2C at 0x26 or NAU7802 at 0x2A): force reads 0");
   }
 #endif
 }
@@ -145,7 +146,7 @@ float read_feature() {
 #elif AIRSPEED_METHOD == METHOD_CUP_HALL
   return g_tacho.rev_per_sec();
 #elif AIRSPEED_METHOD == METHOD_DRAG_PLATE
-  g_load_cell.poll();  // 320 SPS: a fresh conversion on most ticks, else hold the last one
+  g_load_cell.poll();  // NAU7802 320 SPS, Weight I2C 10 SPS: between conversions hold the last one
   return g_load_cell.force_n();
 #endif
 }
@@ -228,6 +229,12 @@ void print_cal() {
   Serial.print(isnan(env.temp_c) ? 0.0f : env.temp_c, 2);
   Serial.print(",\"env_sensors\":");
   Serial.print(g_env.present_mask());
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  Serial.print(",\"lc_frontend\":\"");
+  Serial.print(g_load_cell.frontend_name());
+  Serial.print("\",\"lc_sps\":");
+  Serial.print(g_load_cell.sample_hz(), 0);
+#endif
   Serial.println("}");
 }
 
