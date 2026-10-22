@@ -76,6 +76,39 @@ plus a row in the command table in `calibration/README.md`.
 **Add a server message.** Handle it in the websocket loop in `calibration/app/server.py`, add an action in
 `js/core/store.js`, document it in `calibration/docs/SPEC.md` §6, and cover it in `tests/test_server.py`.
 
+**Recover the board** (no data, a sensor reads nothing, readings drop back to zero). In order:
+1. Free the port: one program at a time owns it. `lsof /dev/cu.usbmodem*` shows who has it; stop extra dashboards
+   (`pkill -f "calib serve"`) and serial monitors. Two readers split the bytes and both keep reconnecting.
+2. Clean-reinstall the STM32 libraries, rebuild and flash (PlatformIO is `../.venv/bin/pio` from `firmware/`):
+   ```bash
+   cd firmware && rm -rf .pio/libdeps/airspeed_drag_plate .pio/build/airspeed_drag_plate \
+     && ../.venv/bin/pio pkg install -e airspeed_drag_plate \
+     && ../.venv/bin/pio run -e airspeed_drag_plate -t upload
+   ```
+   This is what got the load cell reading. Any env works the same way (`-e loadcell_test`, `-e i2c_scan`).
+3. The board boots in velocity-only mode. If the dashboard shows the board streaming but force or other columns
+   are blank (after a reflash or reset with the dashboard running), click "Send MODE D" or restart `pnpm dev`.
+4. Ask the board: `STATS` reports `lc_samples` and `lc_read_failures` (should stay 0); `GET` reports `lc_frontend`
+   (`weight_i2c`, `nau7802` or `none`). Bus check: flash `i2c_scan` (Weight I2C 0x26, NAU7802 0x2A).
+5. Cross-check on another software stack: the STM32 HAL program in `labs/loadcell/` (no Arduino, own NAU7802
+   driver). Build with `python3 labs/loadcell/build.py`, flash it, read raw counts at 2 Hz, then reflash step 2:
+   ```bash
+   OCD=~/.platformio/packages/tool-openocd; $OCD/bin/openocd -s $OCD/openocd/scripts -f board/st_nucleo_f4.cfg \
+     -c "program labs/loadcell/build/loadcell.bin 0x08000000 verify reset exit"
+   ```
+   If both stacks agree, the fault is in hardware.
+
+**Load cell checks** (`docs/hardware.md` has the detail):
+- The firmware uses whichever amplifier answers on I²C, the M5Stack Weight I2C (HX711, 10/s, needs 5V) or the
+  Qwiic Scale (NAU7802, 320/s). Swapping is a re-plug, then tare and scale again.
+- The cell itself: unplugged, a multimeter on Ω 2W reads about 1.0 kΩ red–black and green–white (probes on bare
+  copper, fingers off the metal; tens of kΩ or MΩ means no contact, not a dead cell).
+- Wires need bright bare copper fully in the terminal, or solder them to the RED/BLK/WHT/GRN pads. A reading that
+  jumps between ~0 and millions within milliseconds is a wire making and losing contact.
+- Mount a bar cell by its end block only, on a spacer, arrow pointing down, force on the free end. Clamping the
+  middle (gauge) section or resting the bar on the table gives no reading.
+- `bridge_probe` checks a bridge without a meter (NAU7802 channel survey, A0/A1 as a voltmeter).
+
 ## Rules
 
 - The board is the truth. Everything runs on the Nucleo (brief requirement); the PC only previews, fits and
@@ -86,9 +119,7 @@ plus a row in the command table in `calibration/README.md`.
 - Pins and addresses live in `board_config.h` and `docs/hardware.md`, never in app code.
 - When a sensor or the stream misbehaves, check the STM32 software side first and follow ST's documented way of
   doing things (the STM32duino core and STM32 HAL as ST and the library authors describe them), before blaming
-  wiring. Clean-reinstall the libraries and rebuild:
-  `cd firmware && rm -rf .pio/libdeps/<env> .pio/build/<env> && pio pkg install -e <env> && pio run -e <env> -t upload`.
-  Cross-check with a build on another stack (the STM32 HAL program in `labs/loadcell/`) when in doubt.
+  wiring: run "Recover the board" below.
 - Commits: imperative sentence-case subject ("Add …", "Make …"), body explains why. No AI co-author trailers.
 
 ## Check a change
