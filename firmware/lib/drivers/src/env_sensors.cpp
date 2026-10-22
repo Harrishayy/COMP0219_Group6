@@ -10,20 +10,11 @@
 #include "tmp36.h"
 
 namespace {
-// Values older than this are dropped from the fusion (sensor unplugged mid-run).
+// Values older than this no longer count as the air temperature (sensor unplugged mid-run).
 constexpr uint32_t kStaleMs = 5000;
 // A missing MCP9808 is looked for again this often, so one wired to a running board shows up without a reset.
 constexpr uint32_t kReprobeMs = 2000;
 uint32_t g_mcp9808_probe_ms = 0;
-
-// 1-sigma used to weight each source. Datasheet typical accuracy; tighten after
-// comparing against a reference thermometer.
-constexpr float kSigmaMcp9808 = 0.25f;
-constexpr float kSigmaSht40 = 0.2f;
-constexpr float kSigmaStts22h = 0.5f;
-constexpr float kSigmaLps22df = 1.5f;
-constexpr float kSigmaTmp36 = 2.0f;
-constexpr float kSigmaLm35 = 1.0f;  // LM35 grade, +/-1 C at 25 C; the LM35D is +/-1.5 C
 
 Mcp9808 g_mcp9808;
 Sht40 g_sht40;
@@ -82,7 +73,7 @@ void EnvSensors::begin(const EnvConfig& config) {
   for (uint8_t s = 0; s < kNumSteps; ++s) run_step(static_cast<Step>(s), now);
   delay(12);
   g_sht40.poll(millis(), config_.period_ms);
-  fuse(millis());
+  update_air(millis());
   step_ = 0;
   cycle_start_ms_ = millis();
 }
@@ -159,27 +150,38 @@ void EnvSensors::run_step(Step step, uint32_t now_ms) {
         }
       }
       break;
-    case kFuse:
-      fuse(now_ms);
+    case kAir:
+      update_air(now_ms);
       break;
     default:
       break;
   }
 }
 
-void EnvSensors::fuse(uint32_t now_ms) {
+void EnvSensors::set_calibration(const EnvCalibration& cal) {
+  cal_ = cal;
+  if (cal_.source >= kNumThermometers) cal_.source = kThermoMcp9808;
+  update_air(millis());
+}
+
+float EnvSensors::raw(Thermometer t) const {
+  switch (t) {
+    case kThermoMcp9808: return reading_.t_mcp9808_c;
+    case kThermoSht40: return reading_.t_sht40_c;
+    case kThermoStts22h: return reading_.t_stts22h_c;
+    case kThermoLps22df: return reading_.t_lps22df_c;
+    case kThermoTmp36: return reading_.t_tmp36_c;
+    case kThermoLm35: return reading_.t_lm35_c;
+    default: return NAN;
+  }
+}
+
+void EnvSensors::update_air(uint32_t now_ms) {
   auto fresh = [&](Step s) { return updated_ms_[s] != 0 && now_ms - updated_ms_[s] < kStaleMs; };
-  const airmath::TemperatureSource sources[] = {
-      {reading_.t_mcp9808_c, kSigmaMcp9808, fresh(kMcp9808)},
-      {reading_.t_sht40_c, kSigmaSht40, fresh(kSht40)},
-      {reading_.t_stts22h_c, kSigmaStts22h, fresh(kStts22h)},
-      {reading_.t_lps22df_c, kSigmaLps22df, fresh(kLps22df)},
-      {reading_.t_tmp36_c, kSigmaTmp36, fresh(kTmp36)},
-      {reading_.t_lm35_c, kSigmaLm35, fresh(kLm35) && !isnan(reading_.t_lm35_c)},
-  };
-  float sigma = NAN;
-  reading_.temp_c = airmath::fuse_temperatures(sources, sizeof(sources) / sizeof(sources[0]), &sigma);
-  reading_.temp_sigma_c = sigma;
+  static_assert(static_cast<int>(kMcp9808) == kThermoMcp9808 && static_cast<int>(kLm35) == kThermoLm35,
+                "Thermometer and Step share the same order for the six thermometers");
+  const Thermometer t = static_cast<Thermometer>(cal_.source);
+  reading_.temp_c = fresh(static_cast<Step>(t)) ? raw(t) + cal_.offset_c[t] : NAN;
   float p = fresh(kLps22df) ? reading_.pressure_pa : NAN;
   float rh = fresh(kSht40) ? reading_.rh_pct : NAN;
   reading_.density = airmath::air_density(reading_.temp_c, p, rh);
@@ -191,10 +193,8 @@ float EnvSensors::density() const {
 
 void EnvSensors::print_status(Print& out) const {
   const EnvReading& r = reading_;
-  out.print("#env t_fused=");
+  out.print("#env t_air=");
   out.print(r.temp_c, 2);
-  out.print(" sigma=");
-  out.print(r.temp_sigma_c, 2);
   out.print(" mcp9808=");
   out.print(r.t_mcp9808_c, 2);
   out.print(" sht40=");

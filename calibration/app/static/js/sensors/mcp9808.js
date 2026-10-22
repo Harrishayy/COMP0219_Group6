@@ -1,12 +1,13 @@
-// MCP9808: the most accurate thermometer in the kit (± 0.25 °C typical), on I²C1 at 0x18. The board reads it
-// four times a second inside EnvSensors and fuses it into the air density; the server's 1 Hz `ENV` request
-// brings its reading here. Its own tab: wire it (Wiring), prove the reading is it, settle, compare.
+// MCP9808: the most accurate thermometer in the kit (± 0.25 °C typical), on I²C1 at 0x18, and by default the
+// one the board takes the air temperature (and so ρ) from. The board reads it four times a second inside
+// EnvSensors; the server's 1 Hz `ENV` request brings its raw reading here. Its own tab: wire it (Wiring), prove
+// the reading is it, settle, compare, then calibrate it against a reference (SET mcp9808_offset).
 import { fixed, signed, isNum } from '../core/format.js';
 import wiring from '../wiring/parts/mcp9808.js';
-import { envNow, envVal, histStats, historyView, wireStep, pinchStep, settleStep, compareStep } from './thermometer-kit.js';
+import { envNow, envVal, histStats, historyView, wireStep, pinchStep, settleStep, compareStep, calibrateStep, boardOffset, calibrated, feedsRho } from './thermometer-kit.js';
 
 const KEY = 'mcp9808';
-const S = { pinch: null, pinchOk: null };
+const S = { pinch: null, pinchOk: null, cal: null };
 const LIMITS = { offSht40: 0.5, noise: 0.05, hot: 35 };
 
 const notFound = 'The board does not find it at 0x18. Check SDA (PB9) and SCL (PB8) are not swapped, VDD is on 3V3, and A0–A2 are left open. The board looks for it again every 2 s, so it appears as soon as the wiring is right.';
@@ -15,8 +16,8 @@ export default {
   id: 'mcp9808',
   title: 'MCP9808',
   part: 'Microchip MCP9808 · I²C1 0x18 · ± 0.25 °C typ, 0.0625 °C steps',
-  intro: 'The reference thermometer for the air density: wire it to the I²C bus, prove the reading is it, and check it against the SHT40.',
-  allClear: 'The MCP9808 reads, agrees with the SHT40 and is quiet.',
+  intro: 'The thermometer the air density comes from: wire it to the I²C bus, prove the reading is it, then calibrate it against a reference thermometer.',
+  allClear: 'The MCP9808 reads and is quiet.',
 
   status(s) {
     if (s.conn !== 'open') return { tone: 'idle', text: 'Offline' };
@@ -29,13 +30,16 @@ export default {
   },
 
   readouts: [
-    { label: 'Temperature', unit: '°C', digits: 2, value: (s) => envVal(s, KEY), note: () => 'MCP9808, 4 Hz on the board' },
+    { label: 'Raw', unit: '°C', digits: 2, value: (s) => envVal(s, KEY), note: () => 'as read, 4 Hz on the board' },
+    {
+      label: 'Calibrated', unit: '°C', digits: 2, value: (s) => calibrated(s, KEY),
+      note: (s) => `${isNum(boardOffset(s, KEY)) ? `offset ${signed(boardOffset(s, KEY), 2)} °C` : 'no offset on the board'}${feedsRho(s, KEY) ? ' · feeds ρ' : ''}`,
+    },
     {
       label: 'vs SHT40', unit: '°C', format: (v) => signed(v, 2), value: (s) => envVal(s, KEY) - envVal(s, 'sht40'),
       tone: (s) => (Math.abs(envVal(s, KEY) - envVal(s, 'sht40')) > LIMITS.offSht40 ? 'warn' : null),
       note: (s) => (isNum(envVal(s, 'sht40')) ? 'IKS4A1, ± 0.2 °C' : 'SHT40 not reading'),
     },
-    { label: 'vs fused', unit: '°C', format: (v) => signed(v, 2), value: (s) => envVal(s, KEY) - envVal(s, 't_fused'), note: () => 'all thermometers' },
     {
       label: 'Noise σ', unit: '°C', digits: 3, value: (s) => histStats(s, KEY, 60).sd,
       tone: (s) => (histStats(s, KEY, 60).sd > LIMITS.noise ? 'warn' : null), note: () => 'last 60 s',
@@ -48,7 +52,7 @@ export default {
       lines: [
         { key: KEY, label: 'MCP9808', color: '--s-sensor', width: 2.5 },
         { key: 'sht40', label: 'SHT40', color: '--s-2', width: 1.5 },
-        { key: 't_fused', label: 'Fused', color: '--s-truth', width: 1.5 },
+        { key: 't_air', label: 'Air (ρ)', color: '--s-truth', width: 1.5 },
       ],
     }),
   ],
@@ -58,6 +62,7 @@ export default {
     pinchStep({ key: KEY, name: 'MCP9808', S }),
     settleStep({ key: KEY, name: 'MCP9808' }),
     compareStep({ key: KEY, name: 'MCP9808', refs: [{ key: 'sht40', name: 'SHT40', tol: LIMITS.offSht40 }, { key: 'stts22h', name: 'STTS22H', tol: 0.75 }] }),
+    calibrateStep({ key: KEY, name: 'MCP9808', S }),
   ],
 
   checks(s) {
@@ -100,7 +105,7 @@ export default {
   },
 
   info: {
-    summary: 'A digital thermometer with ± 0.25 °C typical (± 0.5 °C max) accuracy from −20 to 100 °C. The firmware sets 0.0625 °C resolution (250 ms per conversion), reads it at 4 Hz and gives it weight 1/0.25² in the fused temperature, so it and the SHT40 dominate the air density.',
+    summary: 'A digital thermometer with ± 0.25 °C typical (± 0.5 °C max) accuracy from −20 to 100 °C. The firmware sets 0.0625 °C resolution (250 ms per conversion) and reads it at 4 Hz. With temp_source 0 (the default) its reading plus mcp9808_offset is the air temperature the density uses; no other thermometer is mixed in.',
     brief: 'MCP9808 (I²C temperature) for density compensation.',
     source: 'MCP9808 datasheet · docs/hardware.md · firmware/lib/drivers/src/mcp9808.cpp',
     parts: [
@@ -114,6 +119,7 @@ export default {
       'Flash airspeed_drag_plate: this tab shows a temperature.',
       'Pinch it: the reading rises within seconds.',
       'Settled, it agrees with the SHT40 within 0.5 °C.',
+      'Next to a reference thermometer, set the offset; Export so it is in the header.',
     ],
     commands: [
       { label: 'Find every I²C device', cmd: 'cd firmware && pio run -e i2c_scan -t upload && pio device monitor -b 115200' },

@@ -1,13 +1,26 @@
 // Shared pieces for the single-thermometer tabs (MCP9808, LM35): readings from the board's 1 Hz `ENV` reply,
 // a history chart, and the bench steps every thermometer goes through (wire it, pinch it, let it settle,
-// compare it). Not a tab itself: sensors/index.js does not list it.
+// compare it, calibrate it). Not a tab itself: sensors/index.js does not list it.
+//
+// The thermometers are never combined. `ENV` reports each one raw; the board adds `<key>_offset` to the
+// one `temp_source` picks and calls that the air temperature (`t_air`), which sets the density.
 import { h } from '../core/dom.js';
 import { fixed, signed, isNum } from '../core/format.js';
-import { asyncButton, kv } from '../core/ui.js';
+import { asyncButton, kv, numberInput } from '../core/ui.js';
+
+/** Board order of the thermometers: the value of `temp_source` that picks each one (calib/models.py). */
+export const THERMOMETER_KEYS = ['mcp9808', 'sht40', 'stts22h', 'lps22df', 'tmp36', 'lm35'];
 
 /** The last `ENV` reply if it is fresh (the server asks once a second), else null. */
 export const envNow = (s) => (s.env && s.env.age_s < 5 ? s.env : null);
 export const envVal = (s, k) => envNow(s)?.[k] ?? NaN;
+
+/** The offset the board adds to this thermometer (°C), NaN before the board has answered GET. */
+export const boardOffset = (s, k) => s.board?.[`${k}_offset`] ?? NaN;
+/** Raw reading plus the board's offset: what this thermometer reads once calibrated. */
+export const calibrated = (s, k) => envVal(s, k) + (isNum(boardOffset(s, k)) ? boardOffset(s, k) : 0);
+/** True when the board takes the air temperature (and so ρ) from this thermometer. */
+export const feedsRho = (s, k) => THERMOMETER_KEYS[s.board?.temp_source ?? 0] === k;
 
 /** Mean, σ, min and max of one ENV field over the last `sec` seconds of history. */
 export function histStats(s, k, sec) {
@@ -161,6 +174,59 @@ export function compareStep({ key, name, refs }) {
           return [r.name, isNum(d) ? `${signed(d, 2)} °C (tolerance ± ${r.tol} °C)` : 'not reading'];
         })));
       }
+    },
+  };
+}
+
+/**
+ * Step: calibrate against a reference thermometer held next to the part. The offset is reference minus the
+ * raw 30 s mean; it goes to the board with SET <key>_offset and into the header with Export.
+ */
+export function calibrateStep({ key, name, S, windowS = 30 }) {
+  const param = `${key}_offset`;
+  return {
+    id: 'calibrate',
+    title: 'Calibrate against a reference thermometer',
+    why: `Hold a trusted thermometer next to the ${name}, both settled, and type in what it reads. The board then adds the difference to every ${name} reading. Export afterwards (Runs) so the offset survives a reset.`,
+    key: (s) => `${S.cal?.at || ''}|${fixed(boardOffset(s, key), 3)}`,
+    state(s) {
+      if (!isNum(envVal(s, key))) return { tone: 'blocked', text: 'Not reading' };
+      if (!isNum(boardOffset(s, key))) return { tone: 'blocked', text: `Board has no ${param}: flash the current build` };
+      if (!S.cal) return { tone: 'todo', text: boardOffset(s, key) ? `Offset ${signed(boardOffset(s, key), 2)} °C on the board` : '' };
+      return Math.abs(boardOffset(s, key) - S.cal.offset) < 0.005
+        ? { tone: 'done', text: `Offset ${signed(S.cal.offset, 2)} °C on the board` }
+        : { tone: 'todo', text: 'Waiting for the board to confirm' };
+    },
+    body(ctx) {
+      const s = ctx.store;
+      const ref = numberInput({ value: S.cal?.ref ?? '', label: 'Reference temperature in °C' });
+      return h('div.stack',
+        h('div.row.end',
+          h('div.field', h('label', 'Reference (°C)'), ref),
+          asyncButton('Set the offset', async () => {
+            const tRef = Number(ref.value);
+            if (ref.value === '' || !isNum(tRef)) throw new Error('Enter what the reference thermometer reads.');
+            const st = histStats(ctx.store, key, windowS);
+            if (st.n < 10) throw new Error(`Need ${windowS} s of ${name} readings first.`);
+            if (st.max - st.min > 0.2) throw new Error(`The ${name} moved ${fixed(st.max - st.min, 2)} °C in ${windowS} s: let it settle first.`);
+            const offset = tRef - st.mean;
+            if (Math.abs(offset) > 5) throw new Error(`That is ${signed(offset, 2)} °C away. Check the reference is next to the ${name} and reads in °C.`);
+            S.cal = { ref: tRef, raw: st.mean, offset, at: Date.now() };
+            ctx.actions.setOnBoard(param, Number(offset.toFixed(3)));
+            ctx.refresh();
+          }, { primary: true }),
+          isNum(boardOffset(s, key)) && boardOffset(s, key) !== 0 && asyncButton('Clear', async () => {
+            S.cal = null;
+            ctx.actions.setOnBoard(param, 0);
+            ctx.refresh();
+          })),
+        kv([
+          ['On the board now', isNum(boardOffset(s, key)) ? `${signed(boardOffset(s, key), 3)} °C` : 'not reported'],
+          S.cal && ['Last calibration', `reference ${fixed(S.cal.ref, 2)} °C, raw ${fixed(S.cal.raw, 2)} °C (${windowS} s mean)`],
+        ]),
+        h('p.faint', feedsRho(s, key)
+          ? `The board uses the ${name} for the air density, so this offset moves ρ too.`
+          : `The board takes the air density from another thermometer; this offset only changes the ${name}'s own calibrated reading.`));
     },
   };
 }

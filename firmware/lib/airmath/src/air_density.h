@@ -28,14 +28,4 @@ float humid_air_density(float temp_c, float pressure_pa, float rh_percent);
 // a missing pressure falls back to 101325 Pa, missing RH to dry air, missing T to 15 C.
 float air_density(float temp_c, float pressure_pa, float rh_percent);
 
-struct TemperatureSource {
-  float value_c;
-  float sigma_c;  // 1-sigma uncertainty, used as the fusion weight
-  bool valid;
-};
-
-// Inverse-variance weighted mean of the valid sources. Returns NAN if none are valid.
-// If sigma_out is given it receives the combined 1-sigma uncertainty.
-float fuse_temperatures(const TemperatureSource* sources, size_t n, float* sigma_out = nullptr);
-
 }  // namespace airmath

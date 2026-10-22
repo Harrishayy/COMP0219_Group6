@@ -46,15 +46,29 @@ def test_env_reaches_telemetry():
     """The server polls ENV; the simulated board answers like EnvSensors::print_status."""
     from app.server import parse_env
 
-    env = parse_env("#env t_fused=22.31 sigma=0.02 mcp9808=22.30 sht40=nan rh=41.5 p=100870 rho=1.1876")
-    assert env["t_fused"] == 22.31 and env["sht40"] is None and env["p"] == 100870
+    env = parse_env("#env t_air=22.31 mcp9808=22.30 sht40=nan rh=41.5 p=100870 rho=1.1876")
+    assert env["t_air"] == 22.31 and env["sht40"] is None and env["p"] == 100870
     eng = Engine("sim", seed=1)
     eng.sensor_src.connected = True
     eng.poll_env()
     tele = eng.telemetry()["env"]
-    assert set(tele) >= {"t_fused", "mcp9808", "sht40", "stts22h", "lps22df", "tmp36", "rh", "p", "rho", "age_s"}
+    assert set(tele) >= {"t_air", "mcp9808", "sht40", "stts22h", "lps22df", "tmp36", "rh", "p", "rho", "age_s"}
     assert 1.1 < tele["rho"] < 1.3
     assert not any(line.startswith("#env") for line in eng.info)  # polled replies stay out of the log
+
+
+def test_air_temperature_is_one_thermometer_plus_its_offset():
+    """No fusion: t_air is the temp_source thermometer's raw reading plus that thermometer's offset."""
+    from app.server import parse_env
+
+    eng = Engine("sim", seed=1)
+    sim = eng.sensor_src.sim
+    sim.command("SET mcp9808_offset 0.5")
+    env = parse_env(sim._env_line())
+    assert env["t_air"] == pytest.approx(env["mcp9808"] + 0.5, abs=0.011)
+    sim.command("SET temp_source 4")
+    env = parse_env(sim._env_line())
+    assert env["t_air"] == pytest.approx(env["tmp36"], abs=0.011)
 
 
 def test_bench_without_pitot():

@@ -676,8 +676,10 @@ class SimulatedTunnel:
         """The firmware's `ENV` reply (EnvSensors::print_status) for the simulated sensor stack."""
         t, p, rng = self.temp_now, self.press_now, self.rng
         temps = {k: t + b + s * rng.standard_normal() for k, (b, s) in self._THERMOMETERS.items()}
-        rho = float(models.air_density(p, t))
-        parts = [f"t_fused={t:.2f}", "sigma=0.02", *(f"{k}={v:.2f}" for k, v in temps.items()),
+        src = models.THERMOMETERS[int(self.board["temp_source"])]
+        t_air = temps[src] + self.board[f"{src}_offset"]
+        rho = float(models.air_density(p, t_air))
+        parts = [f"t_air={t_air:.2f}", *(f"{k}={v:.2f}" for k, v in temps.items()),
                  f"lm35_v={temps['lm35'] / 100:.4f}",
                  f"rh={41.5 + 0.3 * rng.standard_normal():.1f}", f"p={p:.0f}", f"rho={rho:.4f}"]
         return "#env " + " ".join(parts)

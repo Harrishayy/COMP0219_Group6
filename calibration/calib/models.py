@@ -20,9 +20,14 @@ MODEL_ID = "sqrt"  # protocol / file id of the drag-plate model
 BOARD_METHOD, METHOD_MACRO = "drag_plate", "METHOD_DRAG_PLATE"
 FILTER_BUTTERWORTH, FILTER_EMA = 0, 1
 
+# Thermometers in the order the board's temp_source numbers them (EnvSensors, Thermometer). They are never
+# combined: each has its own offset and one of them gives the air temperature for the density.
+THERMOMETERS = ("mcp9808", "sht40", "stts22h", "lps22df", "tmp36", "lm35")
+TEMP_PARAMS = ("temp_source", *(f"{t}_offset" for t in THERMOMETERS))
+
 # Names the firmware accepts via SET (SPEC §1). rho_ref is PC-only.
 FIRMWARE_PARAMS = ("sqrt_k", "sqrt_x0", "lc_offset", "lc_n_per_count", "lead_tau", "filter_kind", "ema_alpha",
-                   "lpf_hz")
+                   "lpf_hz", *TEMP_PARAMS)
 
 
 def air_density(press_pa, temp_c):
@@ -60,6 +65,11 @@ PARAMS = (
     ParamSpec("lpf_hz", 10.0, 0.0, 99.0, 0.1, "Hz", "Butterworth cutoff (2nd order: damps the plate's ringing)", "dynamics"),
     ParamSpec("lead_tau", 0.0, 0.0, 0.5, 0.001, "s", "First-order lead to cancel the plate's lag; 0 = off", "dynamics"),
     ParamSpec("rho_ref", RHO_REF, 1.0, 1.4, 0.001, "kg/m³", "Density used when the stream has no rho column", "environment"),
+    ParamSpec("temp_source", 0.0, 0.0, len(THERMOMETERS) - 1.0, 1.0, "",
+              "Thermometer for the air density: " + ", ".join(f"{i} {t.upper()}" for i, t in enumerate(THERMOMETERS)),
+              "board"),
+    *(ParamSpec(f"{t}_offset", 0.0, -10.0, 10.0, 0.01, "°C", f"{t.upper()} calibration: added to its raw reading",
+                "board") for t in THERMOMETERS),
 )
 STATIC_PARAMS = ("sqrt_k", "sqrt_x0")
 

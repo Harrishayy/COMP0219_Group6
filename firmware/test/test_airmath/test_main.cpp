@@ -36,17 +36,6 @@ void test_air_density_fallbacks() {
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, dry_air_density(20.0f, 100000.0f), air_density(20.0f, 100000.0f, NAN));
 }
 
-void test_fuse_temperatures_weights_by_variance() {
-  TemperatureSource s[] = {{20.0f, 0.25f, true}, {22.0f, 2.0f, true}, {99.0f, 0.1f, false}};
-  float sigma = 0;
-  float t = fuse_temperatures(s, 3, &sigma);
-  // weights 16 and 0.25 -> (320 + 5.5) / 16.25
-  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 325.5f / 16.25f, t);
-  TEST_ASSERT_TRUE(sigma < 0.25f);
-  TemperatureSource none[] = {{20.0f, 0.25f, false}};
-  TEST_ASSERT_TRUE(std::isnan(fuse_temperatures(none, 1)));
-}
-
 void test_speed_models() {
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, speed_linear(0.01f, 2.0f, 0.5f, 0.05f));
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 6.5f, speed_linear(3.0f, 2.0f, 0.5f, 0.05f));
@@ -110,7 +99,6 @@ int main() {
   RUN_TEST(test_saturation_vapour_pressure);
   RUN_TEST(test_humid_air_is_lighter);
   RUN_TEST(test_air_density_fallbacks);
-  RUN_TEST(test_fuse_temperatures_weights_by_variance);
   RUN_TEST(test_speed_models);
   RUN_TEST(test_butterworth_dc_and_attenuation);
   RUN_TEST(test_lead_compensator);

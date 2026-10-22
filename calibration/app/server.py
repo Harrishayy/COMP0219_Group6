@@ -73,7 +73,7 @@ class FileWatcher:
 
 
 def parse_env(line: str) -> dict:
-    """`#env t_fused=22.31 sigma=0.02 mcp9808=22.30 ... rho=1.1876` -> {name: float | None}."""
+    """`#env t_air=22.31 mcp9808=22.30 ... rho=1.1876` -> {name: float | None}."""
     out = {}
     for tok in line[len("#env"):].split():
         k, _, v = tok.partition("=")

@@ -84,7 +84,7 @@ Working on the code with Claude: `CLAUDE.md` maps every directory and has recipe
 | ------------------------------------------- | ---------------------------------------------------------------------------- |
 | `airspeed_drag_plate`                       | Competition firmware (the team's design): 200 Hz estimate, density-compensated, serial protocol |
 | `airspeed` / `airspeed_cup_hall`            | Same firmware for the dropped cup anemometer (encoder / Hall), kept building in CI |
-| `env_monitor`                               | All five thermometers, pressure, humidity, fused T and air density, 4 Hz CSV |
+| `env_monitor`                               | Every thermometer (raw), the air temperature, pressure, humidity and air density, 4 Hz CSV |
 | `i2c_scan`                                  | Lists I2C devices with the kit part each address belongs to                 |
 | `loadcell_test`                             | Load cell raw/force (Weight I2C or NAU7802); `t` tares, `k 200` calibrates with a 200 g mass |
 | `bridge_probe`                              | NAU7802 bridge check without a multimeter: channel and A0 voltage survey     |
@@ -97,11 +97,12 @@ Working on the code with Claude: `CLAUDE.md` maps every directory and has recipe
 transducer feature ──► static model ──► median-3 ──► lead ──► Butterworth | EMA ──► "5.123\n"
  (rev/s, N)             (uses ρ)        (spikes)   (lead_tau)  (filter_kind: lpf_hz | ema_alpha)
                            ▲
- MCP9808 ─┐                │
- SHT40 ───┤ inverse-variance T,  LPS22DF p,  SHT40 RH  ──►  ρ (humid-air ideal gas)
+ MCP9808 ─┐  temp_source picks one
+ SHT40 ───┤  (+ its offset): T,  LPS22DF p,  SHT40 RH  ──►  ρ (humid-air ideal gas)
  STTS22H ─┤
  LPS22DF ─┤   refreshed every 250 ms in the idle time between ticks,
- TMP36 ───┘   one bus transaction at a time so the 200 Hz tick never slips
+ TMP36 ───┤   one bus transaction at a time so the 200 Hz tick never slips
+ LM35 ────┘
 ```
 
 Transducer options (`AIRSPEED_METHOD`):
@@ -116,8 +117,9 @@ Transducer options (`AIRSPEED_METHOD`):
 
 `ρ = (p − p_v)/(R_d·T) + p_v/(R_v·T)`, with `p_v = RH·p_sat(T)` (Magnus, Alduchov–Eskridge).
 Missing inputs fall back gracefully: no barometer → 101325 Pa; no humidity → dry air; no thermometer → 15 °C
-(ISA, 1.225 kg/m³). Temperatures are fused by inverse variance using datasheet accuracies
-(MCP9808 0.25 °C, SHT40 0.2 °C, STTS22H 0.5 °C, LPS22DF 1.5 °C, TMP36 2 °C).
+(ISA, 1.225 kg/m³). The thermometers are not combined: `temp_source` picks one (MCP9808 by default) and
+the board adds that sensor's own offset (`mcp9808_offset`, …), set on its dashboard tab against a reference
+thermometer. The others are reported raw for comparison.
 
 For sqrt-law transducers `v ∝ ρ^-½`, so a 1 K temperature error moves the estimate by about 0.17%, and
 ignoring a 10 K swing would cost about 1.7%. The SHT40, STTS22H and LPS22DF sit on the IKS4A1 above the

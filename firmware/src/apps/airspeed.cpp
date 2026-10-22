@@ -48,6 +48,13 @@ struct Params {
   float lpf_hz = CAL_LPF_HZ;
   float filter_kind = CAL_FILTER_KIND;
   float ema_alpha = CAL_EMA_ALPHA;
+  float temp_source = CAL_TEMP_SOURCE;  // thermometer for the density, see EnvCalibration
+  float mcp9808_offset = CAL_MCP9808_OFFSET;
+  float sht40_offset = CAL_SHT40_OFFSET;
+  float stts22h_offset = CAL_STTS22H_OFFSET;
+  float lps22df_offset = CAL_LPS22DF_OFFSET;
+  float tmp36_offset = CAL_TMP36_OFFSET;
+  float lm35_offset = CAL_LM35_OFFSET;
 } g_params;
 
 struct ParamEntry {
@@ -62,6 +69,10 @@ const ParamEntry kParams[] = {
     {"lc_offset", &g_params.lc_offset},       {"lc_n_per_count", &g_params.lc_n_per_count},
     {"lead_tau", &g_params.lead_tau},         {"lpf_hz", &g_params.lpf_hz},
     {"filter_kind", &g_params.filter_kind},   {"ema_alpha", &g_params.ema_alpha},
+    {"temp_source", &g_params.temp_source},   {"mcp9808_offset", &g_params.mcp9808_offset},
+    {"sht40_offset", &g_params.sht40_offset}, {"stts22h_offset", &g_params.stts22h_offset},
+    {"lps22df_offset", &g_params.lps22df_offset}, {"tmp36_offset", &g_params.tmp36_offset},
+    {"lm35_offset", &g_params.lm35_offset},
 };
 
 const char* method_name() {
@@ -104,7 +115,7 @@ void sync_from_hardware() {
 #endif
 }
 
-void apply_filter_params() {
+void apply_params() {
   g_lead.configure(g_params.lead_tau, board::kSampleHz);
   g_lpf.configure(g_params.lpf_hz, board::kSampleHz);
   // Clamp rather than reject so the reported value is always the one in use.
@@ -122,6 +133,14 @@ void apply_filter_params() {
   g_load_cell.set_offset(static_cast<int32_t>(g_params.lc_offset));
   g_load_cell.set_scale(g_params.lc_n_per_count);
 #endif
+  float src = roundf(g_params.temp_source);
+  g_params.temp_source = src < 0.0f || src >= kNumThermometers ? 0.0f : src;
+  EnvCalibration cal;
+  cal.source = static_cast<uint8_t>(g_params.temp_source);
+  const float offsets[kNumThermometers] = {g_params.mcp9808_offset, g_params.sht40_offset, g_params.stts22h_offset,
+                                           g_params.lps22df_offset, g_params.tmp36_offset, g_params.lm35_offset};
+  for (uint8_t i = 0; i < kNumThermometers; ++i) cal.offset_c[i] = offsets[i];
+  g_env.set_calibration(cal);
 }
 
 void transducer_begin() {
@@ -265,7 +284,7 @@ void handle_set(char* args) {
     if (strcasecmp(name, p.name) == 0) {
       sync_from_hardware();
       *p.value = v;
-      apply_filter_params();
+      apply_params();
       Serial.print("#ok ");
       Serial.print(p.name);
       Serial.print('=');
@@ -358,7 +377,7 @@ void setup() {
 
   g_env.begin(board::env_config());
   transducer_begin();
-  apply_filter_params();
+  apply_params();
 
   g_tick_timer.setOverflow(static_cast<uint32_t>(board::kSampleHz), HERTZ_FORMAT);
   g_tick_timer.attachInterrupt(on_tick);

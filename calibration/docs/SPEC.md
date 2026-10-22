@@ -18,8 +18,10 @@ Matches `firmware/` exactly. Lines are newline terminated (`\r\n` tolerated), co
 | Header | `#cols,n,v,feature,rho,temp_c,pressure_pa` | printed on every `MODE D` and on `HDR`; names the debug columns (parse it, don't hard-code). The PC sends `MODE D`, `HDR`, `GET` after every (re)connect. |
 | Any `#` line | informational, never data | `#cal {json}`, `#ok name=value`, `#err reason`, `#env ...`, `#stats ...` |
 
-`#env` (reply to `ENV`): `#env t_fused=… sigma=… mcp9808=… sht40=… stts22h=… lps22df=… tmp36=… lm35=… lm35_v=… rh=…
-p=… rho=…`, `nan` for a missing sensor.
+`#env` (reply to `ENV`): `#env t_air=… mcp9808=… sht40=… stts22h=… lps22df=… tmp36=… lm35=… lm35_v=… rh=…
+p=… rho=…`, `nan` for a missing sensor. Each thermometer is reported raw. `t_air` is the one `temp_source` picks
+plus its `<name>_offset`, and is the temperature in `rho` (and `temp_c` in debug and `#cal`). The thermometers
+are never averaged; with the chosen one missing `t_air` is `nan` and `rho` uses 15 °C.
 
 Commands PC → Nucleo: `SET <name> <value>` (→ `#ok name=value` / `#err reason`, RAM only),
 `GET` (→ `#cal {json}` with every live param + method, build date, rho, temp, and on the drag plate
@@ -28,7 +30,9 @@ Commands PC → Nucleo: `SET <name> <value>` (→ `#ok name=value` / `#err reaso
 else is logged as an error (flash the drag-plate build).
 
 Firmware param names (also the export keys; header macro is `CAL_<UPPER_NAME>`):
-`sqrt_k`, `sqrt_x0`, `lc_offset`, `lc_n_per_count`, `lead_tau`, `filter_kind`, `ema_alpha`, `lpf_hz`.
+`sqrt_k`, `sqrt_x0`, `lc_offset`, `lc_n_per_count`, `lead_tau`, `filter_kind`, `ema_alpha`, `lpf_hz`,
+`temp_source` (0 MCP9808, 1 SHT40, 2 STTS22H, 3 LPS22DF, 4 TMP36, 5 LM35), `mcp9808_offset`, `sht40_offset`,
+`stts22h_offset`, `lps22df_offset`, `tmp36_offset`, `lm35_offset` (°C, reference minus raw).
 Method is compile-time (`AIRSPEED_METHOD = METHOD_DRAG_PLATE`).
 
 ### Standalone load-cell lab firmware
@@ -101,8 +105,11 @@ The median runs *before* the lead, so a single-sample spike is removed before th
 Load cell (`lc_offset`, `lc_n_per_count`) is applied on the board before the feature. It is calibrated
 by the static weight routine (`python -m calib weights`): `TARE` with no load, then hang known masses
 and set `lc_n_per_count_new = lc_n_per_count_old * (m g / F_measured)` from a least-squares slope.
-Params in the `board` group (`lc_offset`, `lc_n_per_count`) are mirrored from every `#cal` reply into the PC
-params.
+Params in the `board` group (`lc_offset`, `lc_n_per_count`, `temp_source` and the thermometer offsets) are
+mirrored from every `#cal` reply into the PC params.
+
+Thermometers are calibrated one at a time on their dashboard tab: settled next to a reference thermometer,
+`<name>_offset = T_ref − mean(raw over 30 s)`, sent with `SET` and kept by exporting the header.
 
 ## 4. Metrics (what the marking uses + diagnostics)
 
@@ -158,7 +165,7 @@ Server → client JSON messages:
   `replace: false, decimated: 1` and are appended. telemetry also has `bad_lines, sensor_status, gt_status,
   sensor_connected, gt_connected, profile, auto_push, board, env` (`board` = last `#cal` JSON); `recording` is the
   file name or null. `env` is the board's last `ENV` reply, which the server requests every second (`#env` lines
-  are parsed, not logged): `{t_fused, sigma, mcp9808, sht40, stts22h, lps22df, tmp36, lm35, lm35_v, rh, p, rho,
+  are parsed, not logged): `{t_air, mcp9808, sht40, stts22h, lps22df, tmp36, lm35, lm35_v, rh, p, rho,
   age_s}` (`lm35_v` is the LM35 output in V, reported even when out of range), a missing sensor is `null`; `env`
   is null until the first reply. The simulator answers `ENV` too.
   `board_state` / `board_detail` say where the real board stands, so the dashboard never shows silence or the

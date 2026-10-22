@@ -1,12 +1,13 @@
 // LM35: analog thermometer, 10 mV/°C from 0 V at 0 °C, on PC3 (ADC1_IN13) and powered from 5 V. The board reads
-// it inside EnvSensors with the TMP36 and fuses it (σ 1 °C); `ENV` reports both its temperature and its output
-// voltage, so a wiring fault shows as a voltage with a reason rather than a missing number.
+// it inside EnvSensors alongside the other thermometers (never averaged with them; set temp_source 5 to take ρ
+// from it). `ENV` reports both its raw temperature and its output voltage, so a wiring fault shows as a voltage
+// with a reason rather than a missing number.
 import { fixed, signed, isNum } from '../core/format.js';
 import wiring from '../wiring/parts/lm35.js';
-import { envNow, envVal, histStats, historyView, wireStep, pinchStep, settleStep, compareStep } from './thermometer-kit.js';
+import { envNow, envVal, histStats, historyView, wireStep, pinchStep, settleStep, compareStep, calibrateStep } from './thermometer-kit.js';
 
 const KEY = 'lm35';
-const S = { pinch: null, pinchOk: null };
+const S = { pinch: null, pinchOk: null, cal: null };
 const LIMITS = { tol: 1.5, noise: 0.3, zeroV: 0.02, highV: 1.0 };
 const FLASH = 'cd firmware && pio run -e airspeed_drag_plate -t upload';
 
@@ -86,6 +87,7 @@ export default {
     pinchStep({ key: KEY, name: 'LM35', S }),
     settleStep({ key: KEY, name: 'LM35' }),
     compareStep({ key: KEY, name: 'LM35', refs: [{ key: 'mcp9808', name: 'MCP9808', tol: LIMITS.tol }, { key: 'sht40', name: 'SHT40', tol: LIMITS.tol }] }),
+    calibrateStep({ key: KEY, name: 'LM35', S }),
   ],
 
   checks(s) {
@@ -132,7 +134,7 @@ export default {
   },
 
   info: {
-    summary: 'The output is 10 mV per °C from 0 V at 0 °C, so room temperature is about 0.2–0.3 V. The board reads it with 16× oversampling on the 12-bit ADC (about 0.08 °C per step), scaled by the measured VDDA, and fuses it into the air density with σ 1 °C.',
+    summary: 'The output is 10 mV per °C from 0 V at 0 °C, so room temperature is about 0.2–0.3 V. The board reads it with 16× oversampling on the 12-bit ADC (about 0.08 °C per step), scaled by the measured VDDA. Its offset (lm35_offset) is set on this tab; it feeds the air density only if temp_source is 5.',
     brief: 'An extra analog thermometer alongside the TMP36 and MCP9808 for density compensation.',
     source: 'LM35 datasheet · docs/hardware.md · firmware/lib/drivers/src/lm35.cpp',
     parts: [

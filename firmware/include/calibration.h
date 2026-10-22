@@ -62,3 +62,40 @@
 #ifndef CAL_EMA_ALPHA
 #define CAL_EMA_ALPHA 1.0f  // EMA: y = alpha*x + (1-alpha)*y_prev, 0 < alpha <= 1; 1 = pass-through
 #endif
+
+// ---- Air temperature: which thermometer feeds the density, and each one's offset --------
+// The thermometers are calibrated one by one and never combined. temp_source numbers them:
+// 0 MCP9808, 1 SHT40, 2 STTS22H, 3 LPS22DF (die), 4 TMP36, 5 LM35. Offsets are in C, added
+// to the raw reading (reference minus raw, from the dashboard's calibrate step).
+#ifndef CAL_TEMP_SOURCE
+#define CAL_TEMP_SOURCE 0.0f
+#endif
+#ifndef CAL_MCP9808_OFFSET
+#define CAL_MCP9808_OFFSET 0.0f
+#endif
+#ifndef CAL_SHT40_OFFSET
+#define CAL_SHT40_OFFSET 0.0f
+#endif
+#ifndef CAL_STTS22H_OFFSET
+#define CAL_STTS22H_OFFSET 0.0f
+#endif
+#ifndef CAL_LPS22DF_OFFSET
+#define CAL_LPS22DF_OFFSET 0.0f
+#endif
+#ifndef CAL_TMP36_OFFSET
+#define CAL_TMP36_OFFSET 0.0f
+#endif
+#ifndef CAL_LM35_OFFSET
+#define CAL_LM35_OFFSET 0.0f
+#endif
+
+#include "env_sensors.h"
+// The air-temperature settings above as EnvSensors takes them.
+inline EnvCalibration default_env_calibration() {
+  EnvCalibration c;
+  c.source = static_cast<uint8_t>(CAL_TEMP_SOURCE);
+  const float offsets[kNumThermometers] = {CAL_MCP9808_OFFSET, CAL_SHT40_OFFSET, CAL_STTS22H_OFFSET,
+                                           CAL_LPS22DF_OFFSET, CAL_TMP36_OFFSET,  CAL_LM35_OFFSET};
+  for (uint8_t i = 0; i < kNumThermometers; ++i) c.offset_c[i] = offsets[i];
+  return c;
+}
