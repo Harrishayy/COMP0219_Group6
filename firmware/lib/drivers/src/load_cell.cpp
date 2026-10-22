@@ -5,6 +5,11 @@ namespace {
 constexpr uint8_t kRegRawAdc = 0x00;    // int32, unfiltered HX711 counts (the unit's filters only touch 0x10)
 constexpr uint8_t kRegFirmware = 0xFE;  // non-zero once the unit has booted
 constexpr uint32_t kWeightBootMs = 1500;
+// NAU7802 registers (datasheet section 11). The SparkFun library is used only to set the chip up: its per-sample
+// calls turn a failed I2C read into "data ready" (0xFF) and a reading of 0 or -1, which would pass as real force.
+constexpr uint8_t kNauPuCtrl = 0x00;
+constexpr uint8_t kNauCycleReady = 1 << 5;  // PU_CTRL.CR
+constexpr uint8_t kNauAdcB2 = 0x12;         // ADCO_B2..B0, 24-bit two's complement, MSB first
 
 bool ack(TwoWire& wire, uint8_t addr) {
   wire.beginTransmission(addr);
@@ -14,7 +19,7 @@ bool ack(TwoWire& wire, uint8_t addr) {
 bool read_reg(TwoWire& wire, uint8_t addr, uint8_t reg, uint8_t* buf, uint8_t n) {
   wire.beginTransmission(addr);
   wire.write(reg);
-  if (wire.endTransmission(false) != 0) return false;  // repeated start, as the unit expects
+  if (wire.endTransmission(false) != 0) return false;  // repeated start: the Weight unit needs it, the NAU7802 accepts it
   if (wire.requestFrom(addr, n) != n) return false;
   for (uint8_t i = 0; i < n; ++i) buf[i] = static_cast<uint8_t>(wire.read());
   return true;
@@ -74,7 +79,17 @@ bool LoadCell::read_weight_raw(int32_t* out) {
   return true;
 }
 
+bool LoadCell::note_fail(uint32_t now) {
+  ++fail_total_;
+  if (++fails_ >= kMaxFails) {
+    frontend_ = LoadCellFrontend::kNone;
+    last_probe_ms_ = now;
+  }
+  return false;  // the last good reading is kept; a failed read never becomes a sample
+}
+
 void LoadCell::accept(int32_t raw) {
+  ++sample_total_;
   raw_ = raw;
   if (tare_left_ > 0) {
     tare_sum_ += raw_;
@@ -94,21 +109,21 @@ bool LoadCell::poll() {
     return false;
   }
   if (frontend_ == LoadCellFrontend::kNau7802) {
-    if (!nau_.available()) return false;
-    accept(nau_.getReading());
+    uint8_t st, b[3];
+    if (!read_reg(*wire_, cfg_.addr_nau7802, kNauPuCtrl, &st, 1)) return note_fail(now);
+    if (!(st & kNauCycleReady)) return false;
+    if (!read_reg(*wire_, cfg_.addr_nau7802, kNauAdcB2, b, 3)) return note_fail(now);
+    uint32_t u = static_cast<uint32_t>(b[0]) << 16 | static_cast<uint32_t>(b[1]) << 8 | b[2];
+    if (u & 0x800000u) u |= 0xFF000000u;  // sign-extend 24 to 32 bits
+    fails_ = 0;
+    accept(static_cast<int32_t>(u));
     return true;
   }
   // Weight unit: no data-ready flag, so poll the raw register and take a changed value as a new conversion.
   if (now - last_read_ms_ < kWeightPollMs) return false;
   last_read_ms_ = now;
   int32_t v;
-  if (!read_weight_raw(&v)) {
-    if (++fails_ >= kMaxFails) {
-      frontend_ = LoadCellFrontend::kNone;
-      last_probe_ms_ = now;
-    }
-    return false;
-  }
+  if (!read_weight_raw(&v)) return note_fail(now);
   fails_ = 0;
   if (v == last_weight_raw_) return false;
   last_weight_raw_ = v;

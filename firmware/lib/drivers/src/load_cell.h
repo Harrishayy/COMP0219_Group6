@@ -42,6 +42,8 @@ class LoadCell {
   LoadCellFrontend frontend() const { return frontend_; }
   const char* frontend_name() const;  // "weight_i2c", "nau7802" or "none"
   float sample_hz() const;            // conversions per second of the current front end
+  uint32_t samples() const { return sample_total_; }  // conversions accepted since boot
+  uint32_t failures() const { return fail_total_; }   // I2C reads that failed (and were dropped)
 
  private:
   bool probe();
@@ -49,6 +51,7 @@ class LoadCell {
   bool begin_nau7802();
   bool read_weight_raw(int32_t* out);
   void accept(int32_t raw);
+  bool note_fail(uint32_t now);
 
   static constexpr uint32_t kReprobeMs = 2000;
   static constexpr uint32_t kWeightPollMs = 20;   // 50 Hz: 5x the unit's 10 SPS, new values seen within 20 ms
@@ -62,6 +65,8 @@ class LoadCell {
   uint32_t last_read_ms_ = 0;
   int32_t last_weight_raw_ = INT32_MIN;
   uint8_t fails_ = 0;
+  uint32_t sample_total_ = 0;
+  uint32_t fail_total_ = 0;
   int32_t raw_ = 0;
   int32_t offset_ = 0;
   float scale_ = 1.0f;

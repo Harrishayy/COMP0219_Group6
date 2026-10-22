@@ -313,7 +313,15 @@ void handle_line(char* line) {
     Serial.print(" overruns=");
     Serial.print(g_stats.overruns);
     Serial.print(" max_busy_us=");
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+    Serial.print(g_stats.max_busy_us);
+    Serial.print(" lc_samples=");
+    Serial.print(g_load_cell.samples());
+    Serial.print(" lc_read_failures=");
+    Serial.println(g_load_cell.failures());
+#else
     Serial.println(g_stats.max_busy_us);
+#endif
   } else if (strcasecmp(line, "HELP") == 0 || strcmp(line, "?") == 0) {
     print_help();
   } else if (*line) {
