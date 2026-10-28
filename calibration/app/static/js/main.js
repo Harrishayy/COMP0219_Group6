@@ -1,10 +1,17 @@
-// App shell: app bar (mascot, one tab per sensor from js/sensors/index.js, then Runs), the board banner, hash
-// routing (#<page> or #<page>/<sub-tab>) and the update loop. Tabs show step progress; a part the running
-// firmware does not read is dimmed with a dash. The browser tab gets Sock as its icon, with a status dot.
+// App shell: app bar (mascot, Dashboard, one page per sensor from js/sensors/index.js, Runs, the record button),
+// the strip of readings under it, the board banner, hash routing, keyboard keys and the update loop.
+//
+//   #dashboard   every sensor on one screen (core/dashboard.js); the default
+//   #<sensor>    that sensor's calibration page (core/sensor-page.js), #<sensor>/<sub-tab> for wiring or datasheet
+//   #runs        recordings, export, replay
+//
+// Keys 1–5 open the pages in top-bar order (not while typing). The strip keeps every sensor's readings in view on
+// the sensor pages and Runs. The browser tab gets Sock as its icon, with a status dot.
 import { h, setText, setTone, $ } from './core/dom.js';
 import { store, actions, connectServer } from './core/store.js';
 import { toast } from './core/ui.js';
 import { mountSensorPage, progress, isLive } from './core/sensor-page.js';
+import { mountDashboard, overviewStrip } from './core/dashboard.js';
 import { sock, favicon } from './core/sock.js';
 import { command } from './core/reference.js';
 import { mountConnection } from './pages/connection.js';
@@ -20,29 +27,60 @@ function sensorDef(def) {
     detail: 'This firmware reads the load cell. Open the Load cell tab for live readings and calibration.', commands: [] }) };
 }
 
+// The strip reuses the sensors' own readouts, so a number means the same thing everywhere.
+function fromReadout(section, label, as) {
+  const r = sensors.find((d) => d.id === section)?.readouts?.find((x) => x.label === label);
+  return r && { ...r, section, label: as || r.label };
+}
+const OVERVIEW = [
+  fromReadout('temperature', 'Air temperature'),
+  fromReadout('temperature', 'Air density'),
+  fromReadout('load-cell', 'Load'),
+  fromReadout('wind-speed', 'Sensor', 'Wind speed'),
+  fromReadout('wind-speed', 'Tunnel'),
+  fromReadout('wind-speed', 'Error'),
+].filter(Boolean);
+
+const DASH = 'dashboard';
 const pages = [
+  { id: DASH, title: 'Dashboard', mount: (root) => mountDashboard(root, sensors.map(sensorDef), { onOpen: (id) => go(id) }) },
   ...sensors.map((def) => ({ id: def.id, title: def.title, get def() { return sensorDef(def); }, mount: (root) => mountSensorPage(root, sensorDef(def), { onSub: (sub) => setHash(def.id, sub) }) })),
   { id: runs.id, title: runs.title, mount: (root) => runs.mount(root) },
 ];
+// Older links land on the page that now holds them.
+const ALIAS = { airspeed: 'wind-speed', mcp9808: 'temperature', environment: 'temperature' };
 
 // ---------------------------------------------------------------------------------------- app bar
 const conn = mountConnection();
 const mascot = h('span', { 'aria-live': 'off' });
 const context = h('span', 'Nucleo-F411RE');
-const recChip = h('button.pill.rec', { type: 'button', hidden: true, onclick: () => go('runs') }, h('span.dot.bad.live'), h('span'));
-const tabs = pages.map((p) => {
+// Record: always in the bar. It records what the dashboard sees (board, force, ρ, ground truth) into calibration/runs/.
+const recTime = h('span.t');
+const recBtn = h('button.btn.sm.rec-btn', {
+  type: 'button', 'aria-pressed': 'false', title: 'Record a session (Runs lists them)',
+  onclick: () => {
+    const on = !store.session?.recording;
+    actions.record(on);
+    toast(on ? 'Recording. Press Stop to save it in Runs.' : 'Recording saved: see Runs.');
+  },
+}, h('span.dot'), h('span.l', 'Record'), recTime);
+const tabs = pages.map((p, i) => {
   const badge = h('span.c');
-  const el = h('button.tab', { type: 'button', role: 'tab', id: `tab-${p.id}`, 'aria-controls': `page-${p.id}`, 'aria-selected': 'false', onclick: () => go(p.id) }, p.title, p.def ? badge : null);
+  const el = h('button.tab', { type: 'button', id: `tab-${p.id}`, title: `${p.title} (key ${i + 1})`, onclick: () => go(p.id) },
+    p.title, p.def ? badge : null, h('kbd', String(i + 1)));
   return { p, el, badge };
 });
-const tablist = h('nav.tabs', { role: 'tablist', 'aria-label': 'Sensors' },
-  tabs.map((t, i) => [i === tabs.length - 1 ? h('span.sep', { 'aria-hidden': 'true' }) : null, t.el]));
-tablist.addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-  const i = pages.findIndex((p) => p.id === current), j = (i + (e.key === 'ArrowRight' ? 1 : pages.length - 1)) % pages.length;
-  go(pages[j].id);
-  tabs[j].el.focus();
-});
+const tablist = h('nav.tabs', { 'aria-label': 'Pages' },
+  tabs.map((t, i) => [i === tabs.length - 1 || i === 1 ? h('span.sep', { 'aria-hidden': 'true' }) : null, t.el]));
+const strip = overviewStrip(OVERVIEW, (id) => go(id));
+let selected = null;
+function markTab(id) {
+  if (id === selected) return;
+  selected = id;
+  for (const t of tabs) {
+    if (t.p.id === id) t.el.setAttribute('aria-current', 'location'); else t.el.removeAttribute('aria-current');
+  }
+}
 
 // ------------------------------------------------------------------------------- board banner
 // Says plainly when nothing on screen is live: no board, a silent board, the simulator or a replay. Hidden
@@ -99,7 +137,8 @@ document.body.append(
   h('header.topbar', h('div.wrap',
     h('div.brand', mascot, h('b', 'Bench'), context),
     tablist,
-    h('div.topbar-end', recChip, conn.chip))),
+    h('div.topbar-end', recBtn, conn.chip)),
+    strip.el),
   banner,
   h('main.main', { id: 'main' }, h('div.wrap', { id: 'pages' })));
 
@@ -112,29 +151,47 @@ function setHash(id, sub) {
   if (location.hash !== want) history.replaceState(null, '', want);
 }
 
-function go(route) {
-  let [id, sub] = String(route || '').split('/');
-  if (!pages.some((p) => p.id === id)) id = pages[0].id;
-  if (sub || !location.hash.startsWith(`#${id}/`)) setHash(id, sub);
-  if (id === current) { if (sub) mounted.get(id)?.page.show?.(sub); return; }
+function showPage(id) {
+  if (id === current) return;
   current = id;
   try { localStorage.setItem('calib.tab', id); } catch { /* storage blocked */ }
-  for (const t of tabs) t.el.setAttribute('aria-selected', String(t.p.id === id));
   if (!mounted.has(id)) {
-    const root = h('div', { id: `page-${id}`, role: 'tabpanel', 'aria-labelledby': `tab-${id}` });
+    const root = h('div', { id: `page-${id}` });
     $('#pages').append(root);
     mounted.set(id, { root, page: pages.find((p) => p.id === id).mount(root) });
   }
   for (const [pid, m] of mounted) m.root.hidden = pid !== id;
   mounted.get(id).page.redraw?.();
-  if (sub) mounted.get(id).page.show?.(sub);
   document.title = `${pages.find((p) => p.id === id).title} · Airspeed Bench`;
 }
 
+/** #<page> or #<page>/<sub-tab>; anything unknown is the dashboard. */
+function go(route) {
+  let [id, sub] = String(route || '').split('/');
+  id = ALIAS[id] || id;
+  if (!pages.some((p) => p.id === id)) id = DASH;
+  setHash(id, sub);
+  const changed = id !== current;
+  showPage(id);
+  if (sub) mounted.get(id).page.show?.(sub);
+  markTab(id);
+  // the dashboard fills the screen with no page scroll; the other pages scroll from the top
+  document.body.classList.toggle('fit', id === DASH);
+  strip.el.hidden = id === DASH;
+  if (changed) window.scrollTo(0, 0);
+}
+
 window.addEventListener('hashchange', () => go(location.hash.slice(1)));
+// 1–5: the pages in top-bar order. Not while typing, and not with a modifier (browser shortcuts keep working).
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+  if (e.target.closest?.('input, select, textarea, [contenteditable]')) return;
+  const i = Number(e.key) - 1;
+  if (Number.isInteger(i) && i >= 0 && i < pages.length) { go(pages[i].id); tabs[i].el.focus({ preventScroll: true }); }
+});
 let saved = null;
 try { saved = localStorage.getItem('calib.tab'); } catch { /* storage blocked */ }
-go(location.hash.slice(1) || saved || pages[0].id);
+go(location.hash.slice(1) || saved || DASH);
 updateIcon('idle');
 
 // ------------------------------------------------------------------- live reload (pnpm dev, SPEC §6 `reload`)
@@ -183,11 +240,10 @@ let labMode = false;
 
 function mood() {
   if (!store.streaming) return 'idle';
-  const def = pages.find((p) => p.id === current)?.def;
-  if (!def || !isLive(def, store)) return 'stream';
-  if (def.status(store).tone === 'bad') return 'fault';
-  const p = progress(def, store);
-  return p.total && p.done === p.total ? 'done' : 'stream';
+  const live = sensors.map(sensorDef).filter((d) => isLive(d, store));
+  if (live.some((d) => d.status(store).tone === 'bad')) return 'fault';
+  const ps = live.map((d) => progress(d, store));
+  return ps.length && ps.every((p) => p.total && p.done === p.total) ? 'done' : 'stream';
 }
 
 function loop(now) {
@@ -207,6 +263,7 @@ function loop(now) {
   if (now - lastChrome > 250) {
     lastChrome = now;
     conn.update();
+    if (current !== DASH) strip.update();
     for (const t of tabs) {
       if (!t.p.def) continue;
       const live = isLive(t.p.def, store), st = t.p.def.status(store), p = progress(t.p.def, store);
@@ -221,9 +278,12 @@ function loop(now) {
     updateIcon(md);
     const method = store.tele.method || store.boardMethod;
     setText(context, `Nucleo-F411RE${labMode ? ' · load-cell lab' : METHOD_LABEL[method] ? ' · ' + METHOD_LABEL[method] : ''}`);
-    const rec = store.session?.recording;
-    recChip.hidden = !rec;
-    if (rec) setText(recChip.children[1], `Recording ${duration(store.session.elapsed_s)}`);
+    const rec = !!store.session?.recording;
+    recBtn.setAttribute('aria-pressed', String(rec));
+    setText(recBtn.querySelector('.l'), rec ? 'Stop' : 'Record');
+    setText(recTime, rec ? duration(store.session.elapsed_s) : '');
+    setTone(recBtn.querySelector('.dot'), rec ? 'bad' : null);
+    recBtn.querySelector('.dot').classList.toggle('live', rec);
   }
 }
 requestAnimationFrame(loop);

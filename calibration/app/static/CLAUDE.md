@@ -10,9 +10,12 @@ change. The product brief is `PRODUCT.md` at the repo root; the server protocol 
 | A colour, font, size, radius or spacing     | `css/tokens.css` only                                   |
 | How a component looks                       | `css/app.css` (tokens only, no literal values)          |
 | One sensor's numbers, chart, steps, checks  | `js/sensors/<sensor>.js`                                |
-| Which tabs exist and their order            | `js/sensors/index.js` (one line each)                   |
-| The page layout every sensor shares         | `js/core/sensor-page.js`                                |
-| App bar, routing, tab badges, mascot        | `js/main.js`, `js/core/sock.js`                         |
+| Which sensors exist and their order         | `js/sensors/index.js` (one line each)                   |
+| The calibration page every sensor shares    | `js/core/sensor-page.js`                                |
+| The one-screen dashboard (a tile per sensor) | `js/core/dashboard.js`; what a tile shows: the module's `tile` |
+| The readings strip under the app bar        | `overviewStrip` in `js/core/dashboard.js`; which readouts: `OVERVIEW` in `js/main.js` |
+| App bar, routing, keys 1–5, record button   | `js/main.js`, `js/core/sock.js`                         |
+| Wind Tunnel Logger runs (Tunnel runs panel) | `runsPanel` in `js/sensors/wind-speed.js`; data from `calib/tunnel.py` |
 | Connection popover and chip                 | `js/pages/connection.js`                                |
 | Recording, export, replay, activity log     | `js/pages/runs.js`                                      |
 | Talking to the server, the 200 Hz buffer    | `js/core/store.js`                                      |
@@ -24,11 +27,17 @@ change. The product brief is `PRODUCT.md` at the repo root; the server protocol 
 
 **Add a sensor.** Copy `js/sensors/_template.js` to `js/sensors/<name>.js`, fill it in, import it in
 `js/sensors/index.js` and add it to the list. The contract is documented at the top of `index.js`. Do not add
-CSS or layout code for it: the shared page renders it. If the firmware does not stream the part yet, give it
-`available: () => ({ live: false, title, detail, commands })` and an `info` block; it still gets a tab with
-its reference and bench test.
+CSS or layout code for it: it gets a tile on the dashboard, its own calibration page and a top-bar entry (with the
+next number key). Choose what its tile shows with `tile: { readouts, view }`. If the firmware does not stream the
+part yet, give it `available: () => ({ live: false, title, detail, commands })` and an `info` block; its page shows
+its reference and bench test. To show one of its readouts in the strip under the app bar, add it to `OVERVIEW` in
+`js/main.js` (by its label).
 
-**Remove a sensor.** Delete its line in `js/sensors/index.js`.
+**The dashboard fits one screen.** At 1100 × 680 and up, `#dashboard` fills the viewport and never scrolls
+(`body.fit`): tiles share the height and their charts take what is left. Keep a tile to about four readouts and one
+chart; the full detail belongs on the sensor's page. Below that size the tiles stack and the page scrolls.
+
+**Remove a sensor.** Delete its line in `js/sensors/index.js` (and any `OVERVIEW` entry for it).
 
 **Add wiring or a datasheet.** Give the module `wiring` (a spec from `js/wiring/parts/`), optionally
 `wiringLive(store)`, and `datasheet`; the page grows Bench / Wiring / Datasheet sub-tabs (`#<id>/<sub>`). The
@@ -49,7 +58,7 @@ short class name, and add a row to the catalogue below.
 - Tokens only: no hex, rgb or px font sizes outside `css/tokens.css`.
 - One primary button per step or panel. Status is always a word, never colour alone.
 - Copy is plain and in the team's terms (tare, F₀, Cd·A, pitot). Say what to do next, not what happened.
-- Every sensor works on the open bench and in the tunnel. A step that needs airflow or the pitot returns
+- Every sensor works on the open bench and in the tunnel. A step that needs airflow or the ground truth returns
   `{ tone: 'skip' }` when they are missing; it never blocks.
 - The board is the truth: show what the board runs and whether the PC differs.
 
@@ -60,7 +69,11 @@ short class name, and add a row to the catalogue below.
 | Button          | `.btn` `.primary` `.quiet` `.danger` `.sm` | default, hover, disabled, `aria-busy` |
 | Status pill     | `.pill` + `.ok` `.warn` `.bad`          | always a dot and a word                  |
 | Connection chip | `.health` `.dots`                       | dots: board, pitot, environment          |
-| Tab             | `.tab` `.c` `.off`                      | current, progress, complete, blocked, not in build |
+| Page link       | `.tab` `.c` `.off` `kbd`                | `aria-current`, progress, complete, blocked, not in build; key hint |
+| Record button   | `.btn.sm.rec-btn` `.t`                  | `aria-pressed` while recording, with elapsed time |
+| Readings strip  | `.overview` `.ov`                       | under the app bar on sensor pages and Runs; jumps to the page |
+| Tile            | `.cockpit` `.tile` `.wide` `.tile-head` `.tile-readouts` `.tile-chart` `.tile-foot` | `.off` (not in build); chart `.stale` |
+| Tile footer     | `.tile-next` `.tile-check` `.tile-run`  | next step tone; worst check; last tunnel run |
 | Stat strip      | `.readouts` `.readout`                  | normal, `.ok` `.warn` `.bad`             |
 | Panel           | `.panel` `.panel-head` `.flush`         | with head; flush for lists               |
 | Step            | `.step` `.step-num` `.step-body`        | todo, open, done, blocked, skip          |

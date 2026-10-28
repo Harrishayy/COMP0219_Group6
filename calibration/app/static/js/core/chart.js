@@ -107,7 +107,7 @@ class Base {
 
 /**
  * Live traces against time. draw({ t, i0, window, lines: [{ label, color, data, width?, dash?, digits? }],
- * unit, yMin?, yMax?, zero? }). Lines are min/max decimated per pixel so 30 k points stay cheap.
+ * unit, yMin?, yMax?, zero?, xFormat?(t) }). Lines are min/max decimated per pixel so 30 k points stay cheap.
  */
 export class TimeChart extends Base {
   draw(m) {
@@ -132,7 +132,7 @@ export class TimeChart extends Base {
 
     const { ctx, w, h } = this.begin();
     const F = this.frame(ctx, w, h, [t0, tEnd], [lo, hi], {
-      yUnit: m.unit, xFormat: (v) => (v - tEnd === 0 ? 'now' : `${Math.round(v - tEnd)} s`), yFormat: m.yFormat,
+      yUnit: m.unit, xFormat: m.xFormat || ((v) => (v - tEnd === 0 ? 'now' : `${Math.round(v - tEnd)} s`)), yFormat: m.yFormat,
     });
     ctx.save();
     ctx.beginPath();

@@ -1,10 +1,14 @@
-// Airspeed: the whole drag-plate chain. The board computes
+// Wind speed: the whole drag-plate chain. The board computes
 // v = √(2·(F − F₀) / (ρ·Cd·A)) and then median-3 → lead → EMA | Butterworth (calibration/docs/SPEC.md §3).
 // The server runs the same chain on the PC as a preview with unpushed settings, fits it and diagnoses it.
-// Rig-agnostic: on the open bench (no fan, no pitot) the chain is checked with a known force on the plate;
-// in the tunnel the pitot adds the sweep, the fits and the score. Tunnel steps skip themselves without it.
-import { h } from '../core/dom.js';
+// Rig-agnostic: on the open bench (no fan, no tunnel) the chain is checked with the plate size and a known force;
+// in the tunnel the ground truth (`--gt-vdas`, or any --gt-* source) adds the sweep, the fits and the score.
+// Tunnel steps skip themselves without it. Runs saved by the course's Wind Tunnel Logger (data/tunnel/) are
+// overlaid and scored in the "Tunnel runs" panel (calib/tunnel.py, /api/tunnel/*).
+import { h, fill } from '../core/dom.js';
 import { fixed, signed, smart, isNum } from '../core/format.js';
+import { TimeChart } from '../core/chart.js';
+import { GRAVITY } from '../core/store.js';
 import { asyncButton, button, numberInput, table, kv } from '../core/ui.js';
 
 const BANDS = [2, 3, 4, 5, 6, 7, 8, 9, 10];   // 1 m/s bands from 2 to 11 m/s
@@ -12,19 +16,39 @@ const BAND_FULL_S = 3;
 const CURVE_WINDOW_S = 120;                   // the server keeps 120 s, enough for one sweep
 const RESPONSE_WINDOW_S = 60;
 const MSE_GOOD = 0.05, MSE_OK = 0.2;
-const CD_FLAT_PLATE = [1.1, 1.3];
 
 const FORCE_TOL = 0.01, SPEED_TOL = 0.05;   // known-force check: 1 % on force, 0.05 m/s (or 1 %) on speed
-const SUGGESTED_G = [10, 20, 50];             // ≈ 3.7, 5.3 and 8.3 m/s on a 118 cm² plate
+const SUGGESTED_G = [3, 20, 50];              // ≈ 2, 5.3 and 8.3 m/s on a 10 × 10 cm plate
+const CDA_SANE_CM2 = [10, 1000];              // a Cd·A outside this is not a plate that fits the 30 cm envelope
+const DRIFT_S = 2;                            // moving mean of the error in the 2 min view
 
-const S = { f0: null, force: null, curve: null, response: null, plateCm2: loadPlate() };
+// The body on the load cell. Cd is for the frontal area A (cm² from dimensions in cm), sharp-edged and square to the
+// flow (Hoerner; docs/formulas.md §3). `range` is where a tunnel-fitted Cd should land for that shape.
+const circle = ([d]) => (Math.PI * d * d) / 4;
+const SHAPES = {
+  rect: { label: 'Flat plate (square or rectangle)', cd: 1.17, range: [1.05, 1.35], dims: ['Width', 'Height'], area: ([w, ht]) => w * ht },
+  disc: { label: 'Flat disc', cd: 1.17, range: [1.05, 1.3], dims: ['Diameter'], area: circle },
+  cup: { label: 'Hollow hemisphere, open side to the wind', cd: 1.42, range: [1.25, 1.55], dims: ['Rim diameter'], area: circle },
+  dome: { label: 'Hollow hemisphere, round side to the wind', cd: 0.38, range: [0.3, 0.5], dims: ['Rim diameter'], area: circle },
+};
 
-function loadPlate() {
-  try { return Number(localStorage.getItem('calib.plateAreaCm2')) || 100; } catch { return 100; }
+const S = { f0: null, force: null, curve: null, response: null, body: loadBody(), runs: null, run: null };
+
+function loadBody() {
+  try {
+    const b = JSON.parse(localStorage.getItem('calib.body') || 'null');
+    if (b && SHAPES[b.shape] && b.dims?.every((x) => x > 0)) return b;
+    const side = Math.sqrt(Number(localStorage.getItem('calib.plateAreaCm2')) || 100);  // before shapes existed
+    return { shape: 'rect', dims: [side, side] };
+  } catch { return { shape: 'rect', dims: [10, 10] }; }
 }
-function savePlate(v) {
-  try { localStorage.setItem('calib.plateAreaCm2', String(v)); } catch { /* storage blocked: keep in memory */ }
+function saveBody() {
+  try { localStorage.setItem('calib.body', JSON.stringify(S.body)); } catch { /* storage blocked: keep in memory */ }
 }
+const shape = () => SHAPES[S.body.shape];
+const bodyArea = () => shape().area(S.body.dims);   // cm²
+const bodyCda = () => shape().cd * bodyArea();      // cm², before the tunnel fit
+const bodyText = () => `${shape().label.toLowerCase()}, ${S.body.dims.map((x) => fixed(x, 1)).join(' × ')} cm`;
 
 const cdaCm2 = (k) => 2e4 / k;     // firmware stores k = 2/(Cd·A) in 1/m²
 const isEma = (p) => p.filter_kind >= 0.5;
@@ -34,8 +58,8 @@ const tunnel = (s) => s.hasPitot;
 const fanOn = (s) => tunnel(s) && Math.abs(s.buf.last('gt')) > 0.3;
 const boardParams = (s) => ({ ...s.params, ...Object.fromEntries(Object.entries(s.board).filter(([, v]) => isNum(v))) });
 const rhoNow = (s) => (s.buf.last('rho') > 0.5 ? s.buf.last('rho') : 1.2);
-const NEEDS_TUNNEL = { tone: 'skip', text: 'Needs airflow and the pitot' };
-const tunnelNote = () => h('p.faint', 'Runs in the tunnel. Connect the pitot in Connection (top right) to enable it; the bench steps do not need it.');
+const NEEDS_TUNNEL = { tone: 'skip', text: 'Needs airflow and the ground truth' };
+const tunnelNote = () => h('p.faint', 'Runs in the tunnel. Start the dashboard with the tunnel\'s ground truth (pnpm dev --gt-vdas on the white tunnel, or Connection, top right) to enable it; the bench steps do not need it.');
 const boardScore = (s) => s.metrics?.dev?.mse;
 const previewScore = (s) => s.metrics?.est?.mse;
 const hasForce = (s) => isNum(s.buf.last('feature'));
@@ -57,7 +81,8 @@ const bandsCovered = (s) => coverage(s).filter((x) => x >= BAND_FULL_S).length;
 function streamProblem(s) {
   if (s.conn !== 'open') return { title: 'Calibration server not reachable', detail: 'Start it with `python -m calib serve` in calibration/, then reload this page.' };
   if (!s.streaming) return { title: 'No readings from the board', detail: 'Open Connection (top right) and connect the Nucleo, or start the simulator.' };
-  if (!hasForce(s)) return { title: 'The stream has no force column', detail: 'Send MODE D; if that does not help, flash the airspeed_drag_plate build.', modeD: true };
+  // a replayed Wind Tunnel Logger run has speeds but no force: expected, not a fault
+  if (!hasForce(s)) return s.boardState === 'replay' ? null : { title: 'The stream has no force column', detail: 'Send MODE D; if that does not help, flash the airspeed_drag_plate build.', modeD: true };
   return null;
 }
 
@@ -65,11 +90,33 @@ function streamProblem(s) {
 function drawLive(chart, s, hidden) {
   const b = s.buf, windowS = 20;
   const lines = [
-    { key: 'gt', label: 'Pitot', color: '--s-truth', data: b.col('gt'), width: 2 },
+    { key: 'gt', label: 'Tunnel', color: '--s-truth', data: b.col('gt'), width: 2 },
     { key: 'dev', label: 'Sensor', color: '--s-sensor', data: b.col('dev'), width: 2 },
     { key: 'est', label: 'Preview', color: '--s-preview', data: b.col('est'), dash: true, width: 1.75 },
   ].filter((l) => !hidden.has(l.key));
   chart.draw({ t: b.col('t'), i0: b.since(windowS), window: windowS, unit: 'm/s', yMin: 0, yMax: 4, lines });
+}
+
+// Last 2 min: tunnel and board, and the board's error as a DRIFT_S moving mean, to see it creep
+let errBuf = new Float64Array(0);
+function drawDrift(chart, s, hidden) {
+  const b = s.buf, windowS = 120, n = b.n, i0 = b.since(windowS), k = Math.round(DRIFT_S * 200);
+  const gt = b.col('gt'), dev = b.col('dev');
+  if (errBuf.length < b.cap) errBuf = new Float64Array(b.cap);
+  let sum = 0, cnt = 0;
+  for (let i = Math.max(0, i0 - k); i < n; i++) {
+    const e = dev[i] - gt[i];
+    if (Number.isFinite(e)) { sum += e; cnt++; }
+    const j = i - k, ej = j >= 0 ? dev[j] - gt[j] : NaN;
+    if (j >= 0 && Number.isFinite(ej)) { sum -= ej; cnt--; }
+    errBuf[i] = cnt > k / 2 ? sum / cnt : NaN;
+  }
+  const lines = [
+    { key: 'gt', label: 'Tunnel', color: '--s-truth', data: gt, width: 2 },
+    { key: 'dev', label: 'Board', color: '--s-sensor', data: dev, width: 1.5 },
+    { key: 'err', label: `Error, ${DRIFT_S} s mean`, color: '--s-preview', data: errBuf.subarray(0, n), dash: true, width: 2 },
+  ].filter((l) => !hidden.has(l.key));
+  chart.draw({ t: b.col('t'), i0, window: windowS, unit: 'm/s', zero: true, lines, emptyText: 'Waiting for data…' });
 }
 
 function drawCurve(chart, s, hidden) {
@@ -78,24 +125,24 @@ function drawCurve(chart, s, hidden) {
   let lo = Infinity, hi = -Infinity;
   for (const v of f) if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
   if (lo === Infinity) return chart.empty('No force readings yet');
-  if (!tunnel(s)) return chart.empty('Needs the pitot: the curve is fitted in the tunnel');
+  if (!tunnel(s)) return chart.empty('Needs the ground truth: the curve is fitted in the tunnel');
   const span = hi - lo || 0.01, rho = b.last('rho') > 0.5 ? b.last('rho') : 1.2;
   const curves = [];
   if (!hidden.has('board') && isNum(s.board.sqrt_k)) curves.push({ fn: (x) => speedOf({ ...s.params, ...s.board }, x, rho), color: '--s-sensor', dash: true });
   if (!hidden.has('pc')) curves.push({ fn: (x) => speedOf(s.params, x, rho), color: '--s-preview' });
   chart.draw({
-    xRange: [lo - span * 0.05, hi + span * 0.05], yRange: [0, 12], xUnit: 'force N', yUnit: 'pitot m/s',
+    xRange: [lo - span * 0.05, hi + span * 0.05], yRange: [0, 12], xUnit: 'force N', yUnit: 'tunnel m/s',
     points: hidden.has('pts') ? [] : [{ xs: f, ys: gt, color: '--s-truth', alpha: 0.22 }], curves,
   });
 }
 
 function drawAccuracy(chart, s, hidden) {
-  if (!tunnel(s)) return chart.empty('Needs the pitot');
+  if (!tunnel(s)) return chart.empty('Needs the ground truth');
   const b = s.buf, i0 = b.since(60), gt = b.col('gt').subarray(i0);
   const points = [];
   if (!hidden.has('dev')) points.push({ xs: gt, ys: b.col('dev').subarray(i0), color: '--s-sensor', alpha: 0.3 });
   if (!hidden.has('est')) points.push({ xs: gt, ys: b.col('est').subarray(i0), color: '--s-preview', alpha: 0.22 });
-  chart.draw({ xRange: [0, 12], yRange: [0, 12], xUnit: 'pitot m/s', yUnit: 'sensor m/s', diagonal: true, points });
+  chart.draw({ xRange: [0, 12], yRange: [0, 12], xUnit: 'tunnel m/s', yUnit: 'sensor m/s', diagonal: true, points });
 }
 
 function drawBands(chart, s, hidden) {
@@ -117,9 +164,9 @@ function drawBands(chart, s, hidden) {
       bars.push({ x: k + 0.5 + off, y: bias, err: sd, color, width: 0.34 });
     }
   }
-  if (!bars.length) return chart.empty(tunnel(s) ? 'Needs at least 0.2 s at each speed in the last minute' : 'Needs the pitot');
+  if (!bars.length) return chart.empty(tunnel(s) ? 'Needs at least 0.2 s at each speed in the last minute' : 'Needs the ground truth');
   m = Math.min(4, m * 1.15);
-  chart.draw({ xRange: [1, 12], yRange: [-m, m], xUnit: 'pitot m/s', yUnit: 'error m/s (reads high ↑)', zero: true, bars });
+  chart.draw({ xRange: [1, 12], yRange: [-m, m], xUnit: 'tunnel m/s', yUnit: 'error m/s (reads high ↑)', zero: true, bars });
 }
 
 // ------------------------------------------------------------------------------------------ steps
@@ -129,6 +176,60 @@ function fitSummary(r, rows) {
     h('strong', better ? `MSE ${fixed(r.before.mse, 4)} → ${fixed(r.after.mse, 4)} m²/s²` : `No improvement (MSE ${fixed(r.before?.mse, 4)} → ${fixed(r.after?.mse, 4)})`),
     kv(rows));
 }
+
+// Cd·A the board runs, and the plate it implies
+const boardCda = (s) => (isNum(s.board.sqrt_k) && s.board.sqrt_k > 0 ? cdaCm2(s.board.sqrt_k) : NaN);
+const plateK = () => 2e4 / bodyCda();
+const cdaSane = (cda) => cda >= CDA_SANE_CM2[0] && cda <= CDA_SANE_CM2[1];
+const speedForGrams = (s, g) => speedOf({ ...boardParams(s), sqrt_x0: 0 }, (g / 1000) * GRAVITY, rhoNow(s));
+
+const plateStep = {
+  id: 'plate',
+  title: 'Enter the plate shape and size',
+  why: 'The board turns force into speed with the drag area Cd·A, sent as sqrt_k = 2/(Cd·A). Before any tunnel data, Cd·A is the frontal area times the shape\'s Cd (1.17 for a flat plate or disc, 1.42 for a hollow hemisphere open to the wind, 0.38 turned round); the tunnel fit refines it later. A wrong Cd·A scales every reading: with Cd·A = 2 m² (sqrt_k 1) a few hundred grams reads as 2 m/s. docs/formulas.md has the formulas.',
+  key: (s) => `${S.body.shape}|${S.body.dims.join()}|${fixed(boardCda(s), 1)}`,
+  state(s) {
+    const cda = boardCda(s);
+    if (!isNum(cda)) return { tone: 'blocked', text: 'Board has not answered GET' };
+    if (!cdaSane(cda)) return { tone: 'blocked', text: `Board Cd·A ${fixed(cda, 0)} cm²` };
+    const cd = cda / bodyArea(), [lo, hi] = shape().range;
+    return cd > lo * 0.75 && cd < hi * 1.25 ? { tone: 'done', text: `Cd·A ${fixed(cda, 1)} cm²` } : { tone: 'todo', text: `Cd ${fixed(cd, 2)} for ${fixed(bodyArea(), 0)} cm²` };
+  },
+  body(ctx) {
+    const s = ctx.store, sh = shape(), cda = boardCda(s);
+    const kind = h('select.select', { 'aria-label': 'Body shape' },
+      Object.entries(SHAPES).map(([id, x]) => h('option', { value: id, selected: id === S.body.shape }, `${x.label} (Cd ${x.cd})`)));
+    kind.addEventListener('change', () => {
+      const d = S.body.dims[0];
+      S.body = { shape: kind.value, dims: SHAPES[kind.value].dims.map(() => d) };
+      saveBody();
+      ctx.refresh();
+    });
+    const inputs = sh.dims.map((label, i) => ({ label, el: numberInput({ value: fixed(S.body.dims[i], 1), min: 1, max: 30, label: `${label} in cm`, width: '90px' }) }));
+    // drag at speed v for a drag area in cm²: ½ρv²·Cd·A, in grams
+    const grams = (cdaCm, v) => (1000 * 0.5 * rhoNow(s) * v * v * cdaCm * 1e-4) / GRAVITY;
+    return h('div.stack',
+      h('div.field', h('label', 'Shape'), kind),
+      h('div.row.end',
+        inputs.map((x) => h('div.field', h('label', `${x.label} (cm)`), x.el)),
+        asyncButton('Send Cd·A to board', async () => {
+          const dims = inputs.map((x) => Number(x.el.value));
+          if (!dims.every((x) => x > 0 && x <= 30)) throw new Error('Enter the size in cm (the body must fit the 30 cm envelope).');
+          S.body = { shape: S.body.shape, dims };
+          saveBody();
+          ctx.actions.setOnBoard('sqrt_k', Number(plateK().toPrecision(5)));
+          ctx.toast(`Cd·A ${fixed(bodyCda(), 1)} cm² (sqrt_k ${fixed(plateK(), 1)}) sent. Export the header so the board boots with it.`);
+          await new Promise((r) => setTimeout(r, 700));
+          ctx.refresh();
+        }, { primary: true, busy: 'Sending…' })),
+      kv([
+        ['This body', `A ${fixed(bodyArea(), 1)} cm² × Cd ${sh.cd} = Cd·A ${fixed(bodyCda(), 1)} cm², sqrt_k ${fixed(plateK(), 1)}`],
+        ['Expected drag', `${fixed(grams(bodyCda(), 2), 1)} g at 2 m/s, ${fixed(grams(bodyCda(), 10), 0)} g at 10 m/s`],
+        ['Board now', isNum(cda) ? `Cd·A ${fixed(cda, 1)} cm² (sqrt_k ${smart(s.board.sqrt_k, 4)})${cdaSane(cda) ? '' : `: a ${fixed(Math.sqrt(cda), 0)} cm square plate`}` : 'no GET reply yet'],
+        isNum(cda) && ['On this board', SUGGESTED_G.map((g) => `${g} g → ${fixed(speedForGrams(s, g), 1)} m/s`).join(' · ')],
+      ]));
+  },
+};
 
 const zeroStep = {
   id: 'zero',
@@ -149,17 +250,17 @@ const zeroStep = {
         s.isSim && fanOn(s) && button('Stop the simulated fan', () => ctx.actions.sim({ fan: 'off' })),
         asyncButton('Measure F₀ (3 s)', async () => {
           const m = await ctx.actions.measure('feature', 3);
-          if (tunnel(s) && Math.abs(m.gt) > 0.3) ctx.toast(`The pitot reads ${fixed(m.gt, 2)} m/s: F₀ includes some drag. Stop the fan and measure again.`, 'warn', 6000);
+          if (tunnel(s) && Math.abs(m.gt) > 0.3) ctx.toast(`The tunnel reads ${fixed(m.gt, 2)} m/s: F₀ includes some drag. Stop the fan and measure again.`, 'warn', 6000);
           ctx.actions.setParam('sqrt_x0', Number(m.mean.toPrecision(5)));
           S.f0 = { value: m.mean, sd: m.sd };
           ctx.toast(`F₀ = ${signed(m.mean, 4)} N set on the PC. Push it in the last step.`);
           ctx.refresh();
         }, { primary: true, busy: 'Measuring…' })),
-      h('p.faint', tunnel(s) ? 'Stop the fan and wait until the pitot reads about 0 m/s.' : 'No pitot connected: make sure nothing is blowing on the plate.'));
+      h('p.faint', tunnel(s) ? 'Stop the fan and wait until the tunnel reads about 0 m/s.' : 'No ground truth connected: make sure nothing is blowing on the plate.'));
   },
   update(body, s) {
     const el = body.querySelector('[data-live]');
-    if (el) el.textContent = `${tunnel(s) ? `Pitot ${fixed(pitot(s), 2)} m/s · ` : ''}force ${signed(s.buf.stats('feature', 0.5).mean, 4)} N`;
+    if (el) el.textContent = `${tunnel(s) ? `Tunnel ${fixed(pitot(s), 2)} m/s · ` : ''}force ${signed(s.buf.stats('feature', 0.5).mean, 4)} N`;
   },
 };
 
@@ -187,7 +288,7 @@ const forceStep = {
           ['Speed', `board ${fixed(r.boardV, 2)} m/s, formula ${fixed(r.expectV, 2)} m/s (${signed(r.boardV - r.expectV, 3)})`],
         ]),
         !r.ok && h('p', Math.abs(r.forceErr) >= FORCE_TOL
-          ? 'The force is off: scale the load cell (Load cell tab), then measure F₀ again.'
+          ? 'The force is off: scale the load cell (Load cell section), then measure F₀ again.'
           : 'The force is right but the speed is not: push the PC settings to the board, or check the stream is in MODE D.'));
     }
     return h('div.stack',
@@ -212,7 +313,7 @@ const forceStep = {
           }
           ctx.refresh();
         }, { primary: true, busy: 'Measuring…' })),
-      h('p.faint', `Try ${SUGGESTED_G.join(', ')} g; on this plate they are about 3.7, 5.3 and 8.3 m/s.`),
+      h('p.faint', `Try ${SUGGESTED_G.join(', ')} g; on this board they read about ${SUGGESTED_G.map((g) => fixed(speedForGrams(s, g), 1)).join(', ')} m/s.`),
       out);
   },
 };
@@ -248,7 +349,7 @@ const sweepStep = {
 const curveStep = {
   id: 'curve',
   title: 'Fit the calibration curve',
-  why: 'Finds the drag area Cd·A and F₀ that make the formula match the pitot across the sweep. A robust fit ignores the odd spike from the pitot.',
+  why: 'Finds the drag area Cd·A and F₀ that make the formula match the tunnel across the sweep. A robust fit ignores the odd spike in the ground truth.',
   key: (s) => `${S.curve?.at || ''}|${tunnel(s)}`,
   state(s) {
     if (S.curve) return S.curve.ok ? { tone: 'done', text: `Cd·A ${fixed(cdaCm2(S.curve.params.sqrt_k), 1)} cm²` } : { tone: 'blocked', text: 'Fit failed' };
@@ -258,17 +359,15 @@ const curveStep = {
   },
   body(ctx) {
     if (!tunnel(ctx.store) && !S.curve) return tunnelNote();
-    const area = numberInput({ value: S.plateCm2, min: 1, label: 'Plate area in cm²', width: '100px' });
-    area.addEventListener('change', () => { S.plateCm2 = Number(area.value) || S.plateCm2; savePlate(S.plateCm2); ctx.refresh(); });
     const r = S.curve;
     let out = null;
     if (r?.ok) {
-      const cda = cdaCm2(r.params.sqrt_k), cd = cda / S.plateCm2;
-      const cdOk = cd >= CD_FLAT_PLATE[0] && cd <= CD_FLAT_PLATE[1];
+      const cda = cdaCm2(r.params.sqrt_k), cd = cda / bodyArea(), [lo, hi] = shape().range;
+      const cdOk = cd >= lo && cd <= hi;
       out = fitSummary(r, [
         ['Drag area Cd·A', `${fixed(cda, 1)} cm²  (was ${fixed(cdaCm2(r.previous.sqrt_k), 1)})`],
         ['Zero-flow force F₀', `${signed(r.params.sqrt_x0, 4)} N`],
-        ['Implied Cd', `${fixed(cd, 2)} ${cdOk ? '(a flat plate is 1.1–1.3)' : '(outside 1.1–1.3: check the plate area)'}`],
+        ['Implied Cd', `${fixed(cd, 2)} for a ${bodyText()} ${cdOk ? `(expected ${lo}–${hi})` : `(outside ${lo}–${hi}: check the shape and size in step 1)`}`],
       ]);
       out.append(h('div.row', button('Undo fit', () => {
         ctx.actions.setParams({ sqrt_k: r.previous.sqrt_k, sqrt_x0: r.previous.sqrt_x0 });
@@ -280,7 +379,7 @@ const curveStep = {
     }
     return h('div.stack',
       h('div.row.end',
-        h('div.field', h('label', 'Plate area (cm²)'), area),
+        h('span.faint', `Body: ${bodyText()} (step 1)`),
         asyncButton('Fit curve', async () => {
           const res = await ctx.actions.fit('robust_lsq', ['sqrt_k', 'sqrt_x0'], CURVE_WINDOW_S);
           S.curve = { ...res, at: Date.now() };
@@ -294,7 +393,7 @@ const curveStep = {
 const responseStep = {
   id: 'response',
   title: 'Tune smoothing and lag',
-  why: 'The score is MSE against the pitot, so noise at steady speed and lag on speed changes both cost points. Choose a filter, then fit its setting together with the lag compensation while the fan steps.',
+  why: 'The score is MSE against the tunnel, so noise at steady speed and lag on speed changes both cost points. Choose a filter, then fit its setting together with the lag compensation while the fan steps.',
   key: (s) => `${S.response?.at || ''}|${isEma(s.params)}|${tunnel(s)}`,
   state(s) {
     if (!S.response) return tunnel(s) ? { tone: 'todo', text: '' } : NEEDS_TUNNEL;
@@ -359,7 +458,7 @@ const pushStep = {
       dirty.length
         ? table(['Setting', 'PC', 'Board'], dirty.map((n) => [h('span.mono', n), smart(s.params[n], 5), smart(s.board[n], 5)]))
         : h('p.faint', 'The board runs the same settings as the PC.'),
-      !tunnel(s) && h('p.faint', 'No pitot: settings are confirmed by reading them back. The score comparison runs in the tunnel.'),
+      !tunnel(s) && h('p.faint', 'No ground truth: settings are confirmed by reading them back. The score comparison runs in the tunnel.'),
       h('div.row',
         asyncButton('Push to board', async () => {
           ctx.actions.push();
@@ -371,25 +470,125 @@ const pushStep = {
   },
 };
 
+// ------------------------------------------------------------------------------------ tunnel runs
+// Runs saved by the Wind Tunnel Logger (tools/wind-tunnel-logger, `pnpm logger`): the board against the tunnel,
+// scored and with the drift of its error. Read over HTTP from calib/tunnel.py.
+const runView = { chart: null, sig: '' };
+const runFile = (r) => `${r.dir}/${r.name}_aligned.csv`;
+
+/** Replays a logger run through this page's live views, score and diagnosis (the server's replay source). */
+function replayRun(ctx, r) {
+  ctx.actions.connect({ source: 'replay', replay_file: runFile(r), speed: 1 });
+  ctx.toast(`Replaying ${r.name}: the board line is the logger's board speed, the tunnel line its ground truth. No force was logged, so the curve and response fits need a live session.`, 'ok', 8000);
+  location.hash = '#wind-speed';
+}
+const nan = (a) => Float64Array.from(a, (v) => (v == null ? NaN : v));
+
+function drawRun() {
+  const r = S.run, c = runView.chart;
+  if (!c || !r?.series) return;
+  const sr = r.series, t = nan(sr.t);
+  c.draw({
+    t, i0: 0, window: t[t.length - 1] - t[0] || 1, unit: 'm/s', zero: true, xFormat: (v) => `${Math.round(v)} s`,
+    lines: [
+      { label: 'Tunnel', color: '--s-truth', data: nan(sr.gt), width: 2 },
+      { label: 'Board', color: '--s-sensor', data: nan(sr.board), width: 1.5 },
+      { label: `Error, ${sr.window_s} s mean`, color: '--s-preview', data: nan(sr.error_mean), dash: true, width: 2 },
+    ],
+  });
+}
+
+function runStats(r, ctx) {
+  if (!('mse' in r)) return h('p.faint', `Only ${r.pairs} paired samples: nothing to score.`);
+  const drift = r.drift_per_min, k = r.k_scale;
+  return h('div.stack',
+    kv([
+      ['Run', `${fixed(r.duration_s, 0)} s · ${r.pairs} pairs${r.missing ? ` (${r.missing} tunnel samples with no board sample)` : ''}${isNum(r.board_rate_hz) ? ` · board ${fixed(r.board_rate_hz, 0)} Hz` : ''}${isNum(r.gt_rate_hz) ? ` · tunnel ${fixed(r.gt_rate_hz, 1)} Hz` : ''}`],
+      ['Score', `MSE ${fixed(r.mse, 4)} m²/s² · RMSE ${fixed(r.rmse, 3)} m/s`],
+      ['Error', `bias ${signed(r.bias, 3)} m/s · σ ${fixed(r.sigma, 3)} m/s`],
+      isNum(drift) && ['Drift', `${signed(drift, 3)} m/s per minute · bias ${signed(r.bias_first, 3)} in the first third, ${signed(r.bias_last, 3)} in the last`],
+      r.bands?.length && ['By speed', r.bands.map((b) => `${b.lo}–${b.lo + 1}: ${signed(b.bias, 2)}`).join(' · ')],
+    ]),
+    isNum(k) && Math.abs(k - 1) > 0.02 && h('div.result.warn',
+      h('strong', `Above 2 m/s the board reads ${fixed(Math.abs(1 / Math.sqrt(k) - 1) * 100, 1)} % ${k < 1 ? 'high' : 'low'} at every speed`),
+      h('p', `That is the drag area. If the board ran its current settings during this run, multiply sqrt_k by ${fixed(k, 3)} (Cd·A ${fixed(cdaCm2(ctx.store.params.sqrt_k), 1)} → ${fixed(cdaCm2(ctx.store.params.sqrt_k * k), 1)} cm²), then push.`),
+      h('div.row', button(`Apply sqrt_k × ${fixed(k, 3)} on the PC`, () => {
+        ctx.actions.setParam('sqrt_k', Number((ctx.store.params.sqrt_k * k).toPrecision(5)));
+        ctx.toast('Applied on the PC. Push to send it to the board.');
+      }))));
+}
+
+const runsPanel = {
+  title: 'Tunnel runs',
+  sub: 'Saved by the Wind Tunnel Logger (pnpm logger) in data/tunnel/: the board against the tunnel and the drift of its error.',
+  render(ctx) {
+    const pick = h('select.select', { 'aria-label': 'Tunnel run', style: { flex: '1' } });
+    const stats = h('div'), note = h('p.faint'), host = h('div.chart', { hidden: true });
+    runView.chart = new TimeChart(host);
+    runView.chart.onHover = drawRun;
+
+    async function open(i) {
+      const r = S.runs?.[i];
+      if (!r) return;
+      fill(stats, h('p.faint', 'Loading…'));
+      const res = await fetch(`/api/tunnel/run?name=${encodeURIComponent(r.name)}&dir=${encodeURIComponent(r.dir)}`);
+      const data = await res.json();
+      if (!res.ok) { fill(stats, h('p.faint', data.error || 'Could not read the run.')); return; }
+      S.run = data;
+      runView.block.hidden = false;
+      fill(stats, runStats(data, ctx));
+      drawRun();
+    }
+
+    async function list() {
+      try {
+        const res = await fetch('/api/tunnel/runs');
+        const data = await res.json();
+        S.runs = data.runs;
+        const when = (r) => new Date(r.mtime * 1000).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        fill(pick, S.runs.map((r, i) => h('option', { value: String(i) }, `${r.name} · ${when(r)}`)));
+        note.textContent = S.runs.length ? ''
+          : 'No runs yet. Start the logger with pnpm logger (stop pnpm dev first: one program owns the board\'s port), log a run and save it; it lands in data/tunnel/.';
+        pick.hidden = !S.runs.length;
+        if (S.runs.length) await open(0);
+      } catch {
+        note.textContent = 'The calibration server is not reachable.';
+      }
+    }
+
+    pick.addEventListener('change', () => open(Number(pick.value)));
+    list();
+    const key = (label, color, dash) => h('span.row', { style: { gap: 'var(--sp-1)' } },
+      h(`span.sw${dash ? '.dash' : ''}`, { style: { background: `var(${color})`, color: `var(${color})` } }), label);
+    const legend = h('div.legend', key('Tunnel', '--s-truth'), key('Board', '--s-sensor'), key('Board − tunnel, 10 s mean', '--s-preview', true));
+    const chartBlock = h('div.stack', { hidden: true }, legend, host);
+    host.hidden = false;
+    runView.block = chartBlock;
+    const replay = button('Replay in the calibration views', () => S.runs?.[Number(pick.value)] && replayRun(ctx, S.runs[Number(pick.value)]));
+    return h('div.stack', h('div.row', pick, replay, button('Refresh', list, { cls: '.quiet' })), note, stats, chartBlock);
+  },
+  update() { drawRun(); },
+};
+
 // ----------------------------------------------------------------------------------------- module
 const LEGEND_LIVE = [
-  { key: 'gt', label: 'Pitot', color: '--s-truth' },
+  { key: 'gt', label: 'Tunnel', color: '--s-truth' },
   { key: 'dev', label: 'Sensor (board)', color: '--s-sensor' },
   { key: 'est', label: 'Preview (PC settings)', color: '--s-preview', dash: true },
 ];
 
 export default {
-  id: 'airspeed',
-  title: 'Airspeed',
-  part: 'Drag plate on the load cell · known forces on the bench, the pitot in the tunnel · 200 Hz',
-  intro: 'Turns plate force into airspeed. On the bench: measure F₀ and check a known force. In the tunnel: also sweep, fit the curve and the response, then push. The orange preview shows unpushed settings live.',
-  allClear: 'No problems found. In the tunnel this includes the scoring window against the pitot.',
+  id: 'wind-speed',
+  title: 'Wind speed',
+  part: 'Drag plate on the load cell · v = √(2·(F − F₀) / (ρ·Cd·A)) on the board · 200 Hz',
+  intro: 'Turns plate force into wind speed. On the bench: enter the plate size, measure F₀ and check a known force. In the tunnel: also sweep, fit the curve and the response, then push. The orange preview shows unpushed settings live.',
+  allClear: 'No problems found. In the tunnel this includes the scoring window against the ground truth.',
 
   status(s) {
     if (s.conn !== 'open') return { tone: 'idle', text: 'Offline' };
     const p = streamProblem(s);
     if (p) return { tone: 'bad', text: 'No readings' };
-    if (!tunnel(s)) return S.force ? { tone: S.force.ok ? 'ok' : 'warn', text: S.force.ok ? 'Bench check passed' : 'Bench check off' } : { tone: 'idle', text: 'Bench, no pitot' };
+    if (!tunnel(s)) return S.force ? { tone: S.force.ok ? 'ok' : 'warn', text: S.force.ok ? 'Bench check passed' : 'Bench check off' } : { tone: 'idle', text: 'Bench, no tunnel' };
     const mse = boardScore(s);
     if (!isNum(mse)) return { tone: 'idle', text: 'Scoring…' };
     return { tone: tone(mse) === 'ok' ? 'ok' : tone(mse) === 'warn' ? 'warn' : 'bad', text: `MSE ${fixed(mse, 3)}` };
@@ -401,16 +600,16 @@ export default {
       label: 'Plate force', unit: 'mN', digits: 1, value: (s) => (s.buf.stats('feature', 0.5).mean - (s.params.sqrt_x0 || 0)) * 1000,
       note: () => 'after F₀, last 0.5 s',
     },
-    { label: 'Pitot', unit: 'm/s', digits: 2, value: (s) => (tunnel(s) ? pitot(s) : NaN), note: (s) => (tunnel(s) ? 'ground truth' : 'not connected') },
+    { label: 'Tunnel', unit: 'm/s', digits: 2, value: (s) => (tunnel(s) ? pitot(s) : NaN), note: (s) => (tunnel(s) ? 'ground truth' : 'not connected') },
     {
       label: 'Error', unit: 'm/s', value: (s) => (tunnel(s) ? s.buf.stats('dev', 0.5).mean - pitot(s) : NaN), format: (v) => (isNum(v) ? signed(v, 2) : '–'),
-      note: (s) => (tunnel(s) ? 'sensor − pitot, last 0.5 s' : 'needs the pitot'),
+      note: (s) => (tunnel(s) ? 'board − tunnel, last 0.5 s' : 'needs the ground truth'),
     },
     {
       label: 'Score (MSE, 30 s)', unit: 'm²/s²', digits: 4, value: (s) => (tunnel(s) ? boardScore(s) : NaN), tone: (s) => (tunnel(s) ? tone(boardScore(s)) : null),
       note: (s) => {
         const m = s.metrics?.dev;
-        if (!m) return tunnel(s) ? '' : 'needs the pitot';
+        if (!m) return tunnel(s) ? '' : 'needs the ground truth';
         const base = `bias ${signed(m.bias, 3)} · σ ${fixed(m.sigma, 3)} · lag ${fixed(m.lag_ms, 0)} ms`;
         return s.dirtyParams().length && isNum(previewScore(s)) ? `${base} · preview ${fixed(previewScore(s), 4)}` : base;
       },
@@ -418,14 +617,19 @@ export default {
   ],
 
   views: [
-    { id: 'live', label: 'Live', title: 'Airspeed', sub: 'Last 20 s', legend: LEGEND_LIVE, draw: drawLive },
+    { id: 'live', label: 'Live', title: 'Wind speed', sub: 'Last 20 s', legend: LEGEND_LIVE, draw: drawLive },
     {
-      id: 'curve', label: 'Curve', title: 'Calibration curve', sub: 'Force against pitot speed, last 2 min. The line should run through the dots.', tall: true, kind: 'xy',
+      id: 'drift', label: '2 min', title: 'Board against the tunnel', sub: `Last 2 min. The dashed line is the board's error (${DRIFT_S} s mean): a slope is drift.`,
+      legend: [{ key: 'gt', label: 'Tunnel', color: '--s-truth' }, { key: 'dev', label: 'Board', color: '--s-sensor' }, { key: 'err', label: 'Error', color: '--s-preview', dash: true }],
+      draw: drawDrift,
+    },
+    {
+      id: 'curve', label: 'Curve', title: 'Calibration curve', sub: 'Force against tunnel speed, last 2 min. The line should run through the dots.', tall: true, kind: 'xy',
       legend: [{ key: 'pts', label: 'Samples', color: '--s-truth' }, { key: 'pc', label: 'PC curve', color: '--s-preview' }, { key: 'board', label: 'Board curve', color: '--s-sensor', dash: true }],
       draw: drawCurve,
     },
     {
-      id: 'accuracy', label: 'Accuracy', title: 'Sensor against pitot', sub: 'Last 60 s. On the diagonal is perfect; loops are lag on speed changes.', tall: true, kind: 'xy',
+      id: 'accuracy', label: 'Accuracy', title: 'Board against the tunnel', sub: 'Last 60 s. On the diagonal is perfect; loops are lag on speed changes.', tall: true, kind: 'xy',
       legend: [{ key: 'dev', label: 'Board', color: '--s-sensor' }, { key: 'est', label: 'Preview', color: '--s-preview' }],
       draw: drawAccuracy,
     },
@@ -436,7 +640,32 @@ export default {
     },
   ],
 
-  steps: [zeroStep, forceStep, sweepStep, curveStep, responseStep, pushStep],
+  panels: [runsPanel],
+
+  tile: {
+    readouts: ['Sensor', 'Tunnel', 'Error', 'Score (MSE, 30 s)'], view: 'live', wide: true,
+    // the newest Wind Tunnel Logger run, with a way into the calibration views
+    footer(ctx) {
+      const line = h('div.tile-run');
+      async function refresh() {
+        if (!line.isConnected && runView.tileSeen) return;
+        runView.tileSeen = true;
+        try {
+          const runs = (await (await fetch('/api/tunnel/runs')).json()).runs;
+          if (!runs.length) { fill(line, h('span.label', 'Tunnel'), h('span.faint', 'No logger runs yet: pnpm logger saves them in data/tunnel/.')); return; }
+          const r = runs[0], d = await (await fetch(`/api/tunnel/run?name=${encodeURIComponent(r.name)}&dir=${encodeURIComponent(r.dir)}&series=0`)).json();
+          fill(line, h('span.label', 'Last tunnel run'), h('span.tile-next-title', r.name),
+            h('span.faint', isNum(d.mse) ? `MSE ${fixed(d.mse, 3)} · bias ${signed(d.bias, 2)} · drift ${signed(d.drift_per_min, 2)}/min` : 'too short to score'),
+            h('span.spacer'), button('Replay', () => replayRun(ctx, r), { cls: '.sm.quiet' }));
+        } catch { fill(line, h('span.faint', 'Tunnel runs unavailable: is the server running?')); }
+        setTimeout(refresh, 30000);
+      }
+      refresh();
+      return line;
+    },
+  },
+
+  steps: [plateStep, zeroStep, forceStep, sweepStep, curveStep, responseStep, pushStep],
 
   settings: {
     title: 'Settings',
@@ -476,6 +705,14 @@ export default {
     const p = streamProblem(s);
     if (p) return [{ id: 'stream', level: 'bad', ...p, action: p.modeD ? { label: 'Send MODE D', run: () => ctx.actions.command('MODE D') } : null }];
     const out = [];
+    const cda = boardCda(s);
+    if (isNum(cda) && !cdaSane(cda)) {
+      out.push({
+        id: 'cda', level: 'bad', title: `The board's drag area is ${fixed(cda, 0)} cm²`,
+        detail: `That is a ${fixed(Math.sqrt(cda), 0)} cm square plate, so the board reads ${SUGGESTED_G.map((g) => `${g} g as ${fixed(speedForGrams(s, g), 1)} m/s`).join(', ')}. Enter the shape and size in step 1, or send the Cd·A of the ${bodyText()} now.`,
+        action: { label: `Send Cd·A ${fixed(bodyCda(), 0)} cm²`, run: () => ctx.actions.setOnBoard('sqrt_k', Number(plateK().toPrecision(5))) },
+      });
+    }
     if (s.tele.sensor_hz < 190) {
       out.push({ id: 'rate', level: 'warn', title: `Sensor stream at ${fixed(s.tele.sensor_hz, 0)} Hz`, detail: 'The brief requires 200 Hz. Close other programs using the port, and check the USB cable.' });
     }
@@ -484,9 +721,9 @@ export default {
       out.push({ id: 'dirty', level: 'info', title: `${dirty.length} setting${dirty.length > 1 ? 's are' : ' is'} not on the board yet`, detail: `${dirty.join(', ')}. The sensor line still uses the old values.`, action: { label: 'Push to board', run: () => ctx.actions.push() } });
     }
     if (!tunnel(s)) {
-      out.push({ id: 'bench', level: 'info', title: 'Bench mode: no pitot', detail: 'F₀ and the known-force check work without airflow. The sweep, fits and score appear once the pitot is connected.' });
+      out.push({ id: 'bench', level: 'info', title: 'Bench mode: no ground truth', detail: 'The plate size, F₀ and the known-force check work without airflow. The sweep, fits and score appear once the tunnel\'s ground truth is connected (pnpm dev --gt-vdas).' });
     } else if (!s.metrics?.est) {
-      out.push({ id: 'collecting', level: 'info', title: 'Collecting a score', detail: 'Recommendations appear after a few seconds of data with the pitot.' });
+      out.push({ id: 'collecting', level: 'info', title: 'Collecting a score', detail: 'Recommendations appear after a few seconds of data with the ground truth.' });
     }
     const LEVEL = { high: 'bad', medium: 'warn', info: 'info' };
     for (const d of s.metrics?.diagnosis || []) {
@@ -509,11 +746,11 @@ export default {
     parts: [
       { name: 'Nucleo-F411RE', role: 'Runs the whole estimate', connect: 'USB: power, ST-LINK, virtual COM', spec: '200 Hz tick on TIM5' },
       { name: 'Drag plate on the load cell', role: 'Transducer', connect: 'See Load cell', spec: 'F₀, Cd·A fitted here' },
-      { name: 'Environment sensors', role: 'Air density ρ', connect: 'See Environment', spec: 'Updated between ticks' },
+      { name: 'Environment sensors', role: 'Air density ρ', connect: 'See Temperature', spec: 'Updated between ticks' },
     ],
     test: [
-      'Bench: measure F₀, then pull the plate with 10, 20 and 50 g; the board reads each force and its speed.',
-      'Tunnel: sweep 2 → 10 m/s holding each speed, fit the curve, then fit the response on steps.',
+      'Bench: enter the plate size, measure F₀, then pull the plate with 3, 20 and 50 g; the board reads each force and its speed.',
+      'Tunnel: sweep 2 → 10 m/s holding each speed, fit the curve, then fit the response on steps. Log the assessed runs with the Wind Tunnel Logger (pnpm logger) and compare them under Tunnel runs.',
       'Push and export: the board runs the fitted values, and the next build boots with them.',
       'Check STATS: no overruns at 200 Hz.',
     ],

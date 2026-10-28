@@ -1,6 +1,6 @@
-// Shared pieces for the single-thermometer tabs (MCP9808, LM35): readings from the board's 1 Hz `ENV` reply,
+// Shared pieces for a single-thermometer section (the MCP9808 in temperature.js): readings from the board's 1 Hz `ENV` reply,
 // a history chart, and the bench steps every thermometer goes through (wire it, pinch it, let it settle,
-// compare it, calibrate it). Not a tab itself: sensors/index.js does not list it.
+// compare it, calibrate it). Not a section itself: sensors/index.js does not list it.
 //
 // The thermometers are never combined. `ENV` reports each one raw; the board adds `<key>_offset` to the
 // one `temp_source` picks and calls that the air temperature (`t_air`), which sets the density.
@@ -64,7 +64,7 @@ export function wireStep({ key, name, hint }) {
   return {
     id: 'wire',
     title: `Wire the ${name} and see it on the board`,
-    why: `Follow the Wiring tab step by step, then check the board reads a temperature. Nothing else on this tab means anything until it does.`,
+    why: `Follow the Wiring tab step by step, then check the board reads a temperature. Nothing else in this section means anything until it does.`,
     key: (s) => String(isNum(envVal(s, key))),
     state(s) {
       if (!s.streaming || !envNow(s)) return { tone: 'blocked', text: 'No live data' };
@@ -117,7 +117,7 @@ export function pinchStep({ key, name, rise = 0.5, limitS = 45, S }) {
           ctx.refresh();
         }, { primary: true })),
         S.pinchOk && h('div.result.ok', h('strong', `Rose ${fixed(S.pinchOk, 2)} °C: the reading is the ${name}.`), h('span', 'Let go; it takes a minute or two to cool back.')),
-        failed && h('div.result.warn', h('strong', `No rise in ${limitS} s.`), h('span', `The number may be coming from somewhere else, or the part is not in contact with your fingers. Check the wiring tab, and that you are holding the ${name}.`)));
+        failed && h('div.result.warn', h('strong', `No rise in ${limitS} s.`), h('span', `The number may be coming from somewhere else, or the part is not in contact with your fingers. Check the wiring, and that you are holding the ${name}.`)));
     },
   };
 }

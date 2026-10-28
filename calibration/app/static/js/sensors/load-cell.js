@@ -3,7 +3,7 @@
 // F = (counts − lc_offset) × lc_n_per_count; TARE sets lc_offset, the known-mass step sets lc_n_per_count.
 import { h } from '../core/dom.js';
 import { fixed, signed, smart, isNum } from '../core/format.js';
-import { GRAVITY } from '../core/store.js';
+import { GRAVITY, RHO_REF } from '../core/store.js';
 import { asyncButton, button, numberInput, table, kv } from '../core/ui.js';
 
 // The cell and ADC as wired (firmware/lib/drivers/src/load_cell.cpp). Change these for another cell.
@@ -30,7 +30,7 @@ const FRONTENDS = {
 const frontendId = (s) => s.tele.board?.lc_frontend;
 const frontend = (s) => FRONTENDS[frontendId(s)] || null;
 
-// Progress kept while the tab is closed (the page object is rebuilt, this module is not).
+// Progress kept across a remount (the page object is rebuilt, this module is not).
 const S = { taredAt: null, rows: [], result: null, scaledAt: null, lastScale: null, verify: null };
 
 const toG = (n) => (n / GRAVITY) * 1000;
@@ -54,6 +54,7 @@ const scale = (s) => (isNum(s.board.lc_n_per_count) ? s.board.lc_n_per_count : s
 const offset = (s) => (isNum(s.board.lc_offset) ? s.board.lc_offset : s.params.lc_offset);
 const rawCounts = (s) => s.buf.last('feature') / scale(s) + offset(s);
 const hasForce = (s) => isNum(s.buf.last('feature'));
+const rhoNow = (s) => (s.buf.last('rho') > 0.5 ? s.buf.last('rho') : RHO_REF);
 const fanOn = (s) => s.hasPitot && Math.abs(s.buf.last('gt')) > 0.5;
 const time = (d) => d.toTimeString().slice(0, 5);
 
@@ -253,7 +254,11 @@ export default {
 
   readouts: [
     { label: 'Load', unit: 'g', digits: 1, value: loadG, note: (s) => (hasForce(s) ? `${fixed(s.buf.stats('feature', 0.5).mean, 4)} N` : '') },
-    { label: 'Airspeed', unit: 'm/s', digits: 2, value: (s) => s.buf.stats('dev', 0.5).mean, note: () => 'board output, last 0.5 s' },
+    { label: 'Wind speed', unit: 'm/s', digits: 2, value: (s) => s.buf.stats('dev', 0.5).mean, note: () => 'board output, last 0.5 s' },
+    {
+      label: 'Dynamic pressure', unit: 'Pa', digits: 2, value: (s) => s.buf.dynPressure('dev', 0.5),
+      note: (s) => (s.hasPitot ? `pitot ${fixed(s.buf.dynPressure('gt', 0.5), 2)} Pa` : `½ρv², ρ ${fixed(rhoNow(s), 3)} kg/m³`),
+    },
     {
       label: 'Noise (σ, 3 s)', unit: 'g', digits: 2, value: noiseG,
       tone: (s) => { const n = noiseG(s); return !isNum(n) ? null : n > CELL.noiseBadG ? 'bad' : n > CELL.noiseWarnG ? 'warn' : null; },
@@ -265,6 +270,8 @@ export default {
       note: (s) => { const f = frontend(s); return `${f ? `${f.chip} · ${f.sps}/s · ` : ''}scale ${smart(scale(s), 4)} N/count`; },
     },
   ],
+
+  tile: { readouts: ['Load', 'Noise (σ, 3 s)', 'Drift (30 s)'], view: 'short' },
 
   views: [
     { id: 'short', label: '30 s', title: 'Load', sub: 'Mass equivalent of the force on the cell', legend: [{ key: 'g', label: 'Load', color: '--s-sensor' }], draw: drawLoad(30) },

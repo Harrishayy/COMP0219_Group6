@@ -86,6 +86,7 @@
   --font-display: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
   --font: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+  --t-2xs: 0.625rem;   /* 10, tags and key hints */
   --t-xs: 0.75rem;     /* 12, labels and captions */
   --t-sm: 0.8125rem;   /* 13 */
   --t-md: 0.9375rem;   /* 15, body */
@@ -121,6 +122,7 @@
   --page-max: 1440px;
   --gutter: var(--sp-6);
   --appbar-h: 56px;
+  --overview-h: 44px;  /* the readings strip under the app bar on the sensor pages and Runs */
 }
 
 @media (max-width: 720px) {

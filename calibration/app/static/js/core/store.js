@@ -4,6 +4,7 @@
 
 export const FS = 200;
 export const GRAVITY = 9.80665;
+export const RHO_REF = 1.204;   // kg/m³ at 20 °C, 101325 Pa; same fallback as calib.models.RHO_REF
 const BUFFER_S = 150;
 const ENV_HISTORY_S = 15 * 60;
 const STREAM_KEYS = ['t', 'gt', 'est', 'dev', 'feature', 'rho', 'temp_c', 'pressure_pa', 'lab_raw', 'lab_weight'];
@@ -69,6 +70,17 @@ class Buffer {
     if (!n) return { n: 0, mean: NaN, sd: NaN };
     const mean = s / n;
     return { n, mean, sd: Math.sqrt(Math.max(0, s2 / n - mean * mean)) };
+  }
+  /** Mean dynamic pressure q = ½ρv² (Pa) of a speed column over the last `sec` seconds, each sample with the
+   *  board's ρ at that moment (RHO_REF when it has none). Averages q, not v, as a manometer does. */
+  dynPressure(k, sec) {
+    const v = this.cols[k], rho = this.cols.rho;
+    let n = 0, s = 0;
+    for (let i = this.since(sec); i < this.n; i++) {
+      if (!Number.isFinite(v[i])) continue;
+      n++; s += 0.5 * (rho[i] > 0.5 ? rho[i] : RHO_REF) * v[i] * v[i];
+    }
+    return n ? s / n : NaN;
   }
 }
 
