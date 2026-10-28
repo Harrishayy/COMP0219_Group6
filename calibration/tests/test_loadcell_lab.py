@@ -79,7 +79,7 @@ def test_lab_resets_clear_measurements_but_keep_ack_ids():
     assert source.loadcell_lab["tare_seq"] == 2
     source._handle(10, "Tare: 111 counts")
     assert source.loadcell_lab["tare_seq"] == 3
-    source._handle(11, "#cols,n,v,feature,rho,temp_c,pressure_pa")
+    source._handle(11, "#cols,n,feature,rho,temp_c,pressure_pa,v")
     assert source.loadcell_lab is None  # replaced by competition firmware
 
 

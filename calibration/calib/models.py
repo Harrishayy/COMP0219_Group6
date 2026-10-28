@@ -27,7 +27,7 @@ TEMP_PARAMS = ("temp_source", *(f"{t}_offset" for t in THERMOMETERS))
 
 # Names the firmware accepts via SET (SPEC §1). rho_ref is PC-only.
 FIRMWARE_PARAMS = ("sqrt_k", "sqrt_x0", "lc_offset", "lc_n_per_count", "lead_tau", "filter_kind", "ema_alpha",
-                   "lpf_hz", *TEMP_PARAMS)
+                   "lpf_hz", *TEMP_PARAMS, "pressure_ref_pa")
 
 
 def air_density(press_pa, temp_c):
@@ -70,6 +70,8 @@ PARAMS = (
               "board"),
     *(ParamSpec(f"{t}_offset", 0.0, -10.0, 10.0, 0.01, "°C", f"{t.upper()} calibration: added to its raw reading",
                 "board") for t in THERMOMETERS),
+    ParamSpec("pressure_ref_pa", 101325.0, 50000.0, 120000.0, 1.0, "Pa",
+              "Constant pressure for the density while the LPS22DF is not reading (station pressure)", "board"),
 )
 STATIC_PARAMS = ("sqrt_k", "sqrt_x0")
 

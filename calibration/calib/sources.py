@@ -2,7 +2,7 @@
 
 Every source runs its own daemon thread and delivers samples through callbacks:
 
-    on_sensor(t_pc, row: dict)   # row has n, v, feature, rho, temp_c, pressure_pa, ... (whatever exists)
+    on_sensor(t_pc, row: dict)   # row has n, feature, rho, temp_c, pressure_pa, v, ... (whatever exists)
     on_gt(t_pc, v)
     on_info(line: str)           # '#' lines from the board, adapter status messages
 
@@ -30,7 +30,7 @@ from scipy.signal import cont2discrete, lfilter
 from . import models
 from .data import Run, load_csv
 
-DEFAULT_COLS = ["n", "v", "feature", "rho", "temp_c", "pressure_pa"]
+DEFAULT_COLS = ["n", "feature", "rho", "temp_c", "pressure_pa", "v"]  # v last: see firmware print_header()
 _FLOAT_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 
 

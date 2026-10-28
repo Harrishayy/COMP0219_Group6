@@ -33,9 +33,12 @@
 #endif
 
 // ---- Square-root model for the drag plate: v = sqrt(sqrt_k * (F - sqrt_x0) / rho) --------
-// sqrt_k = 2 / (Cd * A)
+// sqrt_k = 2 / (Cd * A), A in m². The default is a 10 x 10 cm flat plate (Cd 1.17, Cd*A = 117 cm²), so
+// about 2.9 g of drag at 2 m/s and 70 g at 10 m/s. It must stay equal to the toolkit's default
+// (calibration/calib/models.py, test_chain.py checks): 1.0 would mean a 2 m² plate, so a few hundred grams
+// would read as 2 m/s.
 #ifndef CAL_SQRT_K
-#define CAL_SQRT_K 1.0f
+#define CAL_SQRT_K 171.0f
 #endif
 #ifndef CAL_SQRT_X0
 #define CAL_SQRT_X0 0.0f
@@ -88,6 +91,11 @@
 #ifndef CAL_LM35_OFFSET
 #define CAL_LM35_OFFSET 0.0f
 #endif
+// Pa; the density uses this constant whenever the LPS22DF barometer is not reading. Set it from the lab
+// barometer or a nearby weather station's station pressure (not the sea-level figure).
+#ifndef CAL_PRESSURE_REF_PA
+#define CAL_PRESSURE_REF_PA 101325.0f
+#endif
 
 #include "env_sensors.h"
 // The air-temperature settings above as EnvSensors takes them.
@@ -97,5 +105,6 @@ inline EnvCalibration default_env_calibration() {
   const float offsets[kNumThermometers] = {CAL_MCP9808_OFFSET, CAL_SHT40_OFFSET, CAL_STTS22H_OFFSET,
                                            CAL_LPS22DF_OFFSET, CAL_TMP36_OFFSET,  CAL_LM35_OFFSET};
   for (uint8_t i = 0; i < kNumThermometers; ++i) c.offset_c[i] = offsets[i];
+  c.pressure_pa = CAL_PRESSURE_REF_PA;
   return c;
 }

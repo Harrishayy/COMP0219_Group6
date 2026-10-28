@@ -97,3 +97,27 @@ def test_missing_samples_do_not_poison_the_filter():
     raw = {"feature": np.array([9.0, np.nan, 9.0, 9.0, np.nan, 9.0]), "rho": np.ones(6)}
     y = models.apply({"sqrt_k": 1, "sqrt_x0": 0, "filter_kind": 1, "ema_alpha": 0.3}, raw)
     assert np.all(np.isfinite(y))
+
+
+def test_pressure_ref_reaches_the_board_and_header():
+    """The constant pressure for ρ (no barometer) is a board param: pushed with SET and written to the header."""
+    from calib import export
+
+    p = {**models.default_params(), "pressure_ref_pa": 99850.0}
+    assert "SET pressure_ref_pa 99850" in export.push_lines(p)
+    assert "#define CAL_PRESSURE_REF_PA 99850.0f" in export.header_text(p, "test")
+    assert models.default_params()["pressure_ref_pa"] == 101325.0
+
+
+def test_board_boots_with_the_toolkit_curve():
+    """The board's default force -> speed curve is the toolkit's. A board left on sqrt_k 1.0 (Cd·A = 2 m²) read
+    a few hundred grams as 2 m/s while the dashboard preview looked right."""
+    import re
+    from pathlib import Path
+
+    header = (Path(__file__).resolve().parents[2] / "firmware/include/calibration.h").read_text()
+    defaults = models.default_params()
+    for name in models.STATIC_PARAMS:
+        m = re.search(rf"#define CAL_{name.upper()} ([-+0-9.eE]+)f", header)
+        assert m, f"CAL_{name.upper()} missing from calibration.h"
+        assert float(m.group(1)) == pytest.approx(defaults[name]), name

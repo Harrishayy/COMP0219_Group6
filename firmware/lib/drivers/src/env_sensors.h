@@ -29,6 +29,7 @@ enum Thermometer : uint8_t { kThermoMcp9808, kThermoSht40, kThermoStts22h, kTher
 struct EnvCalibration {
   uint8_t source = kThermoMcp9808;           // which thermometer gives the air temperature
   float offset_c[kNumThermometers] = {};     // added to that thermometer's raw reading
+  float pressure_pa = 101325.0f;             // constant pressure for the density while the LPS22DF is not reading
 };
 
 // Per-thermometer values are raw readings; temp_c is the calibrated air temperature.

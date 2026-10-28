@@ -139,13 +139,13 @@ changed over serial with `SET <name> <value>` without reflashing. See [`docs/cal
 | Line from the board       | Meaning                                                                 |
 | ------------------------- | ----------------------------------------------------------------------- |
 | `5.123`                   | Velocity mode (default): airspeed in m/s, 200 Hz                        |
-| `n,v,feature,rho,temp_c,pressure_pa` | Debug mode CSV; `n` is the sample counter (a gap means a dropped tick) |
+| `n,feature,rho,temp_c,pressure_pa,v` | Debug mode CSV; `n` is the sample counter (a gap means a dropped tick). `v` is last so the Wind Tunnel Logger reads it in either mode |
 | `#...`                    | Informational. Never data, so any parser should skip lines starting with `#` |
 
 | Command            | Reply                                                                       |
 | ------------------ | --------------------------------------------------------------------------- |
 | `MODE V`           | Switch to velocity stream (default)                                        |
-| `MODE D`           | Switch to debug CSV; prints `#cols,n,v,feature,rho,temp_c,pressure_pa`      |
+| `MODE D`           | Switch to debug CSV; prints `#cols,n,feature,rho,temp_c,pressure_pa,v`      |
 | `HDR`              | Re-print the `#cols,...` header (resync after reconnecting)                 |
 | `GET`              | `#cal {json}`: method, build, every parameter, current ρ and T             |
 | `SET <name> <v>`   | `#ok name=v` / `#err ...`; RAM only, lost on reset                          |

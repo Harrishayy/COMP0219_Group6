@@ -182,7 +182,7 @@ void EnvSensors::update_air(uint32_t now_ms) {
                 "Thermometer and Step share the same order for the six thermometers");
   const Thermometer t = static_cast<Thermometer>(cal_.source);
   reading_.temp_c = fresh(static_cast<Step>(t)) ? raw(t) + cal_.offset_c[t] : NAN;
-  float p = fresh(kLps22df) ? reading_.pressure_pa : NAN;
+  float p = fresh(kLps22df) ? reading_.pressure_pa : cal_.pressure_pa;
   float rh = fresh(kSht40) ? reading_.rh_pct : NAN;
   reading_.density = airmath::air_density(reading_.temp_c, p, rh);
 }

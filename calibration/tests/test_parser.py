@@ -5,9 +5,15 @@ from calib.sources import LineParser
 def test_stream_formats():
     p = LineParser()
     assert p.parse("5.123\r\n") == ("v", 5.123)                       # MODE V
-    assert p.parse(b"#cols,n,v,feature,rho,temp_c,pressure_pa\n")[0] == "cols"
-    kind, row = p.parse("17,4.2,1.85,1.1890,22.31,100870")            # MODE D
-    assert kind == "d" and row["n"] == 17 and row["feature"] == 1.85
+    assert p.parse(b"#cols,n,feature,rho,temp_c,pressure_pa,v\n")[0] == "cols"
+    kind, row = p.parse("17,1.85,1.1890,22.31,100870,4.2")            # MODE D
+    assert kind == "d" and row["n"] == 17 and row["feature"] == 1.85 and row["v"] == 4.2
+
+
+def test_debug_rows_end_with_the_speed():
+    """The course's Wind Tunnel Logger reads the last field of a comma line as the speed."""
+    from calib.sources import DEFAULT_COLS
+    assert DEFAULT_COLS[-1] == "v"
 
 
 def test_hash_lines_are_never_data():

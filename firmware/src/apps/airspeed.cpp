@@ -55,6 +55,7 @@ struct Params {
   float lps22df_offset = CAL_LPS22DF_OFFSET;
   float tmp36_offset = CAL_TMP36_OFFSET;
   float lm35_offset = CAL_LM35_OFFSET;
+  float pressure_ref_pa = CAL_PRESSURE_REF_PA;  // density's pressure while the LPS22DF is not reading
 } g_params;
 
 struct ParamEntry {
@@ -72,7 +73,7 @@ const ParamEntry kParams[] = {
     {"temp_source", &g_params.temp_source},   {"mcp9808_offset", &g_params.mcp9808_offset},
     {"sht40_offset", &g_params.sht40_offset}, {"stts22h_offset", &g_params.stts22h_offset},
     {"lps22df_offset", &g_params.lps22df_offset}, {"tmp36_offset", &g_params.tmp36_offset},
-    {"lm35_offset", &g_params.lm35_offset},
+    {"lm35_offset", &g_params.lm35_offset},   {"pressure_ref_pa", &g_params.pressure_ref_pa},
 };
 
 const char* method_name() {
@@ -140,6 +141,10 @@ void apply_params() {
   const float offsets[kNumThermometers] = {g_params.mcp9808_offset, g_params.sht40_offset, g_params.stts22h_offset,
                                            g_params.lps22df_offset, g_params.tmp36_offset, g_params.lm35_offset};
   for (uint8_t i = 0; i < kNumThermometers; ++i) cal.offset_c[i] = offsets[i];
+  if (!(g_params.pressure_ref_pa >= 50000.0f && g_params.pressure_ref_pa <= 120000.0f)) {
+    g_params.pressure_ref_pa = CAL_PRESSURE_REF_PA;  // a typo (hPa for Pa) must not wreck the density
+  }
+  cal.pressure_pa = g_params.pressure_ref_pa;
   g_env.set_calibration(cal);
 }
 
@@ -191,7 +196,9 @@ struct Stats {
   uint32_t max_busy_us = 0;
 } g_stats;
 
-void print_header() { Serial.println("#cols,n,v,feature,rho,temp_c,pressure_pa"); }
+// v is last: the course's Wind Tunnel Logger takes the last field of a comma line as the speed, so it reads the
+// right number even if the board is left in MODE D.
+void print_header() { Serial.println("#cols,n,feature,rho,temp_c,pressure_pa,v"); }
 
 void emit(float v, float feature, float rho) {
   if (g_mode == Mode::kVelocity) {
@@ -202,15 +209,15 @@ void emit(float v, float feature, float rho) {
   const EnvReading& env = g_env.reading();
   Serial.print(g_seq);
   Serial.print(',');
-  Serial.print(v, 3);
-  Serial.print(',');
   Serial.print(feature, 5);
   Serial.print(',');
   Serial.print(rho, 4);
   Serial.print(',');
   Serial.print(env.temp_c, 2);
   Serial.print(',');
-  Serial.println(env.pressure_pa, 0);
+  Serial.print(env.pressure_pa, 0);
+  Serial.print(',');
+  Serial.println(v, 3);
 }
 
 void tick() {
