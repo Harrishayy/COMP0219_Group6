@@ -55,7 +55,8 @@ the flow at our Reynolds numbers (Hoerner, *Fluid-Dynamic Drag*, 1965; ±5 %):
 | Hollow hemisphere, open side to the wind (a cup) | π·d²/4 (rim) | 1.42 | Ø10 cm: 112 cm² | 179 | 2.7 g / 68 g |
 | Hollow hemisphere, round side to the wind | π·d²/4 (rim) | 0.38 | Ø10 cm: 30 cm² | 670 | 0.7 g / 18 g |
 | Solid hemisphere, flat face to the wind | π·d²/4 | 1.17 | | | |
-| Sphere | π·d²/4 | 0.47 (Re < 2·10⁵) | | | |
+| Sphere | π·d²/4 | 0.47 (Re < 2·10⁵) | Ø7 cm: 18 cm² · Ø8 cm: 24 cm² | 1106 · 847 | Ø8: 0.6 g / 14.5 g |
+| Hollow hemisphere Ø8 cm, open side to the wind | 50.3 cm² | 1.42 | 71 cm² | 280 | 1.8 g / 44 g |
 
 (ρ = 1.20 kg/m³.) What this means for a design:
 
@@ -112,9 +113,19 @@ F = (counts − lc_offset) · lc_n_per_count
 
 **Mount geometry.** Calibrate with the mass pulling where and how the wind pushes: at the centre of the plate, along
 the flow (a thread over a pulley if the cell lies horizontal). Then any lever ratio, a stalk's bending or the cell's
-sensitivity to where the load sits is inside `lc_n_per_count`. If the plate is on a lever arm pivoting at a point,
-the cell sees `F_cell = F_drag·(L_plate / L_cell)`, with L the distances from the pivot. A lever with L_plate > L_cell
-multiplies the drag force, which is more resolution, but it must be scaled with the mass at the plate.
+sensitivity to where the load sits is inside `lc_n_per_count`.
+
+- **A lever on a pivot.** If the body sits on an arm that turns about a hinge and presses on the cell, the cell sees
+  `F_cell = F_drag·(L_body / L_cell)`, with L each one's distance from the pivot. An arm with L_body > L_cell
+  multiplies the force, which is more resolution.
+- **A mast on a bar load cell does not do that.** The 1 kg bar cell is a parallel-beam (single-point) cell: its gauges
+  sit in pairs, so it reads the force across it and largely ignores the moment. That is why a kitchen scale reads the
+  same wherever the load sits. A body on a mast rising from the cell's free end gives roughly the drag force itself,
+  not drag × (mast length / cell length). The mast's value is putting the body in clean air in the middle of the
+  tunnel, away from the floor's boundary layer. The moment it adds is what the cell rejects, and how well it rejects
+  it is not specified, so the real ratio is whatever the masses say: hang them at the body's centre, along the flow,
+  and the scale includes it. A tall mast also lowers the mount's stiffness and natural frequency f_n (section 6),
+  so check the ringing.
 
 ## 6. The output chain (200 Hz, `tick()`)
 

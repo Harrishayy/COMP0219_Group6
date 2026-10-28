@@ -30,6 +30,7 @@ const SHAPES = {
   disc: { label: 'Flat disc', cd: 1.17, range: [1.05, 1.3], dims: ['Diameter'], area: circle },
   cup: { label: 'Hollow hemisphere, open side to the wind', cd: 1.42, range: [1.25, 1.55], dims: ['Rim diameter'], area: circle },
   dome: { label: 'Hollow hemisphere, round side to the wind', cd: 0.38, range: [0.3, 0.5], dims: ['Rim diameter'], area: circle },
+  sphere: { label: 'Sphere', cd: 0.47, range: [0.4, 0.55], dims: ['Diameter'], area: circle },
 };
 
 const S = { f0: null, force: null, curve: null, response: null, body: loadBody(), runs: null, run: null };
@@ -186,7 +187,7 @@ const speedForGrams = (s, g) => speedOf({ ...boardParams(s), sqrt_x0: 0 }, (g / 
 const plateStep = {
   id: 'plate',
   title: 'Enter the plate shape and size',
-  why: 'The board turns force into speed with the drag area Cd·A, sent as sqrt_k = 2/(Cd·A). Before any tunnel data, Cd·A is the frontal area times the shape\'s Cd (1.17 for a flat plate or disc, 1.42 for a hollow hemisphere open to the wind, 0.38 turned round); the tunnel fit refines it later. A wrong Cd·A scales every reading: with Cd·A = 2 m² (sqrt_k 1) a few hundred grams reads as 2 m/s. docs/formulas.md has the formulas.',
+  why: 'The board turns force into speed with the drag area Cd·A, sent as sqrt_k = 2/(Cd·A). Before any tunnel data, Cd·A is the frontal area times the shape\'s Cd (1.17 for a flat plate or disc, 1.42 for a hollow hemisphere open to the wind, 0.38 turned round, 0.47 for a sphere); the tunnel fit refines it later. A wrong Cd·A scales every reading: with Cd·A = 2 m² (sqrt_k 1) a few hundred grams reads as 2 m/s. docs/formulas.md has the formulas.',
   key: (s) => `${S.body.shape}|${S.body.dims.join()}|${fixed(boardCda(s), 1)}`,
   state(s) {
     const cda = boardCda(s);
