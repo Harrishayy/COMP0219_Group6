@@ -253,6 +253,7 @@ export default {
 
   readouts: [
     { label: 'Load', unit: 'g', digits: 1, value: loadG, note: (s) => (hasForce(s) ? `${fixed(s.buf.stats('feature', 0.5).mean, 4)} N` : '') },
+    { label: 'Airspeed', unit: 'm/s', digits: 2, value: (s) => s.buf.stats('dev', 0.5).mean, note: () => 'board output, last 0.5 s' },
     {
       label: 'Noise (σ, 3 s)', unit: 'g', digits: 2, value: noiseG,
       tone: (s) => { const n = noiseG(s); return !isNum(n) ? null : n > CELL.noiseBadG ? 'bad' : n > CELL.noiseWarnG ? 'warn' : null; },
