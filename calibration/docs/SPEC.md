@@ -15,7 +15,7 @@ Matches `firmware/` exactly. Lines are newline terminated (`\r\n` tolerated), co
 |---|---|---|
 | Velocity (default, `MODE V`) | `5.123` | one float per line, m/s, 200 Hz. What the marking script reads. |
 | Debug (`MODE D`) | `<n>,<v>,<feature>,<rho>,<temp_c>,<pressure_pa>` | `n` sample counter (gap > 1 = dropped tick); `feature` = drag-plate force F in N (after tare and load-cell scale). |
-| Header | `#cols,n,v,feature,rho,temp_c,pressure_pa` | printed on every `MODE D` and on `HDR`; names the debug columns (parse it, don't hard-code). The PC sends `MODE D`, `HDR`, `GET` after every (re)connect. |
+| Header | `#cols,n,feature,rho,temp_c,pressure_pa,v` | printed on every `MODE D` and on `HDR`; names the debug columns (parse it, don't hard-code). The PC sends `MODE D`, `HDR`, `GET` after every (re)connect. |
 | Any `#` line | informational, never data | `#cal {json}`, `#ok name=value`, `#err reason`, `#env ...`, `#stats ...` |
 
 `#env` (reply to `ENV`): `#env t_air=… mcp9808=… sht40=… stts22h=… lps22df=… tmp36=… lm35=… lm35_v=… rh=…
@@ -32,7 +32,8 @@ else is logged as an error (flash the drag-plate build).
 Firmware param names (also the export keys; header macro is `CAL_<UPPER_NAME>`):
 `sqrt_k`, `sqrt_x0`, `lc_offset`, `lc_n_per_count`, `lead_tau`, `filter_kind`, `ema_alpha`, `lpf_hz`,
 `temp_source` (0 MCP9808, 1 SHT40, 2 STTS22H, 3 LPS22DF, 4 TMP36, 5 LM35), `mcp9808_offset`, `sht40_offset`,
-`stts22h_offset`, `lps22df_offset`, `tmp36_offset`, `lm35_offset` (°C, reference minus raw).
+`stts22h_offset`, `lps22df_offset`, `tmp36_offset`, `lm35_offset` (°C, reference minus raw), `pressure_ref_pa`
+(Pa, the density's pressure while the LPS22DF is not reading; the board ignores values outside 50–120 kPa).
 Method is compile-time (`AIRSPEED_METHOD = METHOD_DRAG_PLATE`).
 
 ### Standalone load-cell lab firmware
@@ -70,7 +71,18 @@ If the script prints pitot differential pressure in Pa instead of m/s, add `--gt
 `connect.gt_pressure`): each sample becomes `v = √(2·max(dp, 0)/ρ)` with the board's
 latest ρ (`rho_ref` until one arrives).
 
+4. **VDAS** — `--gt-vdas`: the white tunnel's VDAS-F / AFA5 cell over USB HID, read with the Wind Tunnel
+   Logger's own `vdas_afa5.py` (tools/wind-tunnel-logger). `calib/vdas_gt.py:read_pa` averages 5 s with the fan
+   off (a mean beyond ±6 Pa is rejected for +3 Pa, as the logger does) and yields `|dp − offset|`; the flag
+   implies `--gt-pressure`. About 5 samples/s, whole Pa.
+
 All samples are timestamped on the PC with `time.perf_counter()` on arrival.
+
+Runs saved by the Wind Tunnel Logger itself (`<run>_aligned.csv`: `timestamp_epoch, ground_truth_mps,
+student_mps`, plus `_vdas.csv` and `_student.csv`) are read by `calib/tunnel.py` from `data/tunnel/` and
+`~/Documents/Wind Tunnel Logger/logs`, over HTTP (§6) and by `calib tunnel`. `calib.data.load_csv` also opens any
+of a run's files as a replay (`connect {source: "replay", replay_file}`): the board's samples as `v` (re-spaced
+evenly, since the logger stamps whole serial chunks) and the tunnel's as ground truth; no force column.
 
 ## 3. Model (force → airspeed), mirroring `firmware/lib/airmath`
 
@@ -105,7 +117,7 @@ The median runs *before* the lead, so a single-sample spike is removed before th
 Load cell (`lc_offset`, `lc_n_per_count`) is applied on the board before the feature. It is calibrated
 by the static weight routine (`python -m calib weights`): `TARE` with no load, then hang known masses
 and set `lc_n_per_count_new = lc_n_per_count_old * (m g / F_measured)` from a least-squares slope.
-Params in the `board` group (`lc_offset`, `lc_n_per_count`, `temp_source` and the thermometer offsets) are
+Params in the `board` group (`lc_offset`, `lc_n_per_count`, `temp_source`, the thermometer offsets and `pressure_ref_pa`) are
 mirrored from every `#cal` reply into the PC params.
 
 Thermometers are calibrated one at a time on their dashboard tab: settled next to a reference thermometer,
@@ -154,6 +166,11 @@ The header export target is `firmware/include/calibration_generated.h` (it overr
 writes into `firmware/include/` when `--install` is passed.
 
 ## 6. Live app websocket protocol (`ws://localhost:8765/ws`)
+
+Read-only HTTP, for Wind Tunnel Logger runs (§2): `GET /api/tunnel/runs` → `{runs: [{name, dir, files, mtime}],
+dirs}`, newest first; `GET /api/tunnel/run?name=&dir=&series=0|1` → `calib.tunnel.load()` (`series=0` leaves out the traces): `{name, pairs, missing, mse, rmse,
+bias, sigma, drift_per_min, bias_first, bias_last, k_scale?, bands, board_rate_hz, gt_rate_hz, series: {t, board, gt,
+error_mean, window_s}}` (404 `{error}` when missing). `dir` must be one of the listed folders.
 
 Server → client JSON messages:
 

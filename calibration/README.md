@@ -77,6 +77,7 @@ The same work without the dashboard:
 | `session run.json` | One row per settings change in a recording, with its score against the pitot. `--png` plots it. |
 | `export cal.json` / `push cal.json --port P` | Rewrite the header and `SET` file from a calibration JSON / send it to the board. |
 | `sim` | Write a simulated run, for trying things without hardware. |
+| `tunnel [run] [--list]` | Score a Wind Tunnel Logger run (`data/tunnel/`) against the tunnel: MSE, bias, σ, drift per minute, error per speed band, and the Cd·A change that would remove a constant percentage error. Newest run by default. |
 
 ## Ground truth
 
@@ -88,6 +89,13 @@ Point the toolkit at the lab's pitot script in whichever form we are given (in S
 
 Add `--gt-pressure` if the script prints the pitot's differential pressure in Pa rather than m/s: each sample
 becomes `v = √(2·Δp/ρ)` with the board's live ρ.
+
+On the white TecQuipment tunnel, `--gt-vdas` (`pnpm dev --gt-vdas`) reads its VDAS box over USB the way the course's
+Wind Tunnel Logger does (`tools/wind-tunnel-logger`, `calib/vdas_gt.py`): it zeroes with the fan off for 5 s at
+start, then streams whole pascals about 5 times a second. Start it with the fan off, and close the logger first:
+one program drives the box. For the assessed runs, use the logger itself (`pnpm logger`) and compare them in the
+dashboard's Tunnel runs panel or with `calib tunnel`. `serve --replay data/tunnel/<run>_aligned.csv` (or Replay in
+the dashboard) plays a logger run through the calibration views.
 
 ## When the sensor disagrees with the pitot
 

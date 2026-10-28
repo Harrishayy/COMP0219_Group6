@@ -12,6 +12,7 @@
     "dev:board": "node scripts/bench.mjs board",
     "dev:sim": "node scripts/bench.mjs sim",
     "check:wiring": "node scripts/check-wiring.mjs",
-    "test": "node scripts/bench.mjs test"
+    "test": "node scripts/bench.mjs test",
+    "logger": "node scripts/bench.mjs logger"
   }
 }

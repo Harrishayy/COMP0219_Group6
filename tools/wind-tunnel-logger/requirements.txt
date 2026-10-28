@@ -1,0 +1,7 @@
+# Wind Tunnel Logger v1.0.0 (its wheel's Requires-Dist)
+PySide6>=6.5
+pyqtgraph>=0.13
+pyserial>=3.5
+PyYAML>=6.0
+numpy>=1.24
+hidapi>=0.14

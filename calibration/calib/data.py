@@ -70,6 +70,9 @@ def load_csv(path: str | Path) -> Run:
         header = next(r)
         if header[:4] == ["t", "gt", "v_board", "v_pc"]:
             return _load_session_csv(path, header, r)
+        if header[:2] == ["timestamp_iso", "timestamp_epoch"]:  # a Wind Tunnel Logger run (calib/tunnel.py)
+            from .tunnel import as_run
+            return as_run(path)
         if header[:3] != ["t", "src", "gt"]:
             raise ValueError(f"{path}: not a calibration run CSV (header {header[:3]})")
         chans = header[3:]

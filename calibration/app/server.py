@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from calib import export, fit, metrics, models
 from calib import recorder as recmod
+from calib import tunnel
 from calib.metrics import resample
 from calib.data import Run
 from calib.recorder import Session
@@ -915,6 +916,21 @@ def create_app(engine: Engine) -> FastAPI:
     @app.get("/api/state")
     async def state():
         return JSONResponse(engine.hello())
+
+    # Wind Tunnel Logger runs (calib/tunnel.py): read-only, so plain HTTP rather than the websocket
+    @app.get("/api/tunnel/runs")
+    async def tunnel_runs():
+        return JSONResponse({"runs": tunnel.list_runs(), "dirs": [str(d) for d in tunnel.RUN_DIRS]})
+
+    @app.get("/api/tunnel/run")
+    async def tunnel_run(name: str = "", dir: str = "", series: int = 1):
+        try:
+            # only the logger's own folders: never an arbitrary path from the page
+            dirs = [d for d in tunnel.RUN_DIRS if not dir or str(d) == dir] or tunnel.RUN_DIRS
+            r = await asyncio.get_running_loop().run_in_executor(None, lambda: tunnel.load(Path(name).name or None, dirs, series=bool(series)))
+        except (FileNotFoundError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse(r)
 
     @app.get("/")
     async def index():

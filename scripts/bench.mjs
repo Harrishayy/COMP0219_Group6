@@ -5,6 +5,7 @@
 //   pnpm dev:board           the same (kept for habit); BENCH_PORT=/dev/… picks the port
 //   pnpm dev:sim             dashboard on the simulator (every reading synthetic, and labelled as such)
 //   pnpm test                calibration tests
+//   pnpm logger              the course's Wind Tunnel Logger (tools/wind-tunnel-logger), runs saved in data/tunnel/
 //
 // Extra arguments go straight to `python -m calib serve`, e.g. pnpm dev:board --gt-cmd "python3 gt.py".
 //
@@ -27,6 +28,7 @@ const WIN = process.platform === 'win32';
 const PY = join(VENV, WIN ? 'Scripts/python.exe' : 'bin/python');
 const REQS = join(CAL, 'requirements.txt');
 const STAMP = join(VENV, '.bench-requirements');
+const LOGGER = join(ROOT, 'tools/wind-tunnel-logger');
 const DEFAULT_HTTP_PORT = 8765;
 
 const fail = (msg) => { console.error(`\nbench: ${msg}\n`); process.exit(1); };
@@ -47,13 +49,18 @@ function ensurePython() {
     say(`creating .venv with Python ${v.stdout.trim()}`);
     run(sys, ['-m', 'venv', VENV]);
   }
-  const want = createHash('sha256').update(readFileSync(REQS)).digest('hex');
-  const have = existsSync(STAMP) ? readFileSync(STAMP, 'utf8').trim() : '';
+  ensureRequirements(REQS, STAMP, 'calibration requirements');
+}
+
+// Installs a requirements file into .venv, again only when the file changes.
+function ensureRequirements(file, stamp, label) {
+  const want = createHash('sha256').update(readFileSync(file)).digest('hex');
+  const have = existsSync(stamp) ? readFileSync(stamp, 'utf8').trim() : '';
   if (want !== have) {
-    say('installing calibration requirements (first run, or requirements.txt changed)');
+    say(`installing ${label} (first run, or its requirements.txt changed)`);
     run(PY, ['-m', 'pip', 'install', '--quiet', '--upgrade', 'pip']);
-    run(PY, ['-m', 'pip', 'install', '--quiet', '--requirement', REQS]);
-    writeFileSync(STAMP, want + '\n');
+    run(PY, ['-m', 'pip', 'install', '--quiet', '--requirement', file]);
+    writeFileSync(stamp, want + '\n');
   }
 }
 
@@ -135,4 +142,9 @@ else if (cmd === 'test') {
   run(PY, ['-m', 'pytest', '-q', ...extra], { cwd: CAL });
   run(process.execPath, ['--test', join(CAL, 'tests/load-cell-lab.test.mjs')]);
   run(process.execPath, [join(ROOT, 'scripts/check-wiring.mjs')]);
-} else fail(`unknown command ${cmd}: use dev, board, sim or test`);
+} else if (cmd === 'logger') {
+  ensurePython();
+  ensureRequirements(join(LOGGER, 'requirements.txt'), join(VENV, '.logger-requirements'), 'Wind Tunnel Logger requirements');
+  say('runs are saved in data/tunnel/. The logger needs the board\'s port: stop pnpm dev first.');
+  run(PY, [join(LOGGER, 'run.py'), ...extra], { cwd: ROOT });
+} else fail(`unknown command ${cmd}: use dev, board, sim, test or logger`);

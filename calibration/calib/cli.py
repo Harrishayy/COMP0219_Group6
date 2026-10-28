@@ -25,6 +25,14 @@ def _add_gt_args(p):
     g.add_argument("--gt-port", help="serial port streaming GT floats")
     g.add_argument("--gt-baud", type=int, default=115200)
     g.add_argument("--gt-pressure", action="store_true", help="GT prints pitot differential pressure (Pa), not m/s")
+    g.add_argument("--gt-vdas", action="store_true",
+                   help="the white tunnel's VDAS box over USB, read as the Wind Tunnel Logger reads it (fan off at start)")
+
+
+def _resolve_gt(a):
+    """--gt-vdas is the module adapter calib/vdas_gt.py with --gt-pressure."""
+    if getattr(a, "gt_vdas", False):
+        a.gt_module, a.gt_pressure = f"{Path(__file__).with_name('vdas_gt.py')}:read_pa", True
 
 
 def _load_params(path: str | None) -> dict:
@@ -63,6 +71,7 @@ def cmd_record(a):
     PC preview computed from --params (default: defaults)."""
     from app.server import Engine
 
+    _resolve_gt(a)
     if not (a.port or a.gt_cmd or a.gt_module or a.gt_port):
         raise SystemExit("nothing to record: give --port and/or a --gt-* option")
     eng = Engine("live", sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd, gt_module=a.gt_module,
@@ -455,6 +464,22 @@ def cmd_stream(a):
         pass
 
 
+def cmd_tunnel(a):
+    """Score a Wind Tunnel Logger run against the tunnel and show its drift."""
+    from . import tunnel
+
+    if a.list:
+        for r in tunnel.list_runs():
+            print(f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(r['mtime']))}  {r['name']}  "
+                  f"({', '.join(sorted(r['files']))})  {r['dir']}")
+        return
+    try:
+        r = tunnel.load(a.run, series=False)
+    except FileNotFoundError as e:
+        sys.exit(str(e))
+    print("\n".join(tunnel.summary_lines(r)))
+
+
 def cmd_serve(a):
     from app.server import Engine, serve
 
@@ -468,6 +493,7 @@ def cmd_serve(a):
         if not a.port:
             a.port = AUTO_PORT
             print("no --port given: waiting for a Nucleo on USB (pass --sim for the simulator)")
+    _resolve_gt(a)
     eng = Engine(mode, a.window, sensor_port=a.port, baud=a.baud, gt_cmd=a.gt_cmd, gt_module=a.gt_module,
                  gt_port=a.gt_port, gt_baud=a.gt_baud, gt_pressure=a.gt_pressure, replay=a.replay,
                  replay_speed=a.speed, profile=a.profile, seed=a.seed)
@@ -553,6 +579,11 @@ def main(argv=None):
     p.add_argument("--interval", type=float, default=0.1, help="seconds per printed line")
     p.add_argument("--span", type=float, default=2000.0, help="counts from centre to the end of the bar")
     p.set_defaults(fn=cmd_stream)
+
+    p = sub.add_parser("tunnel", help="score a Wind Tunnel Logger run against the tunnel: MSE, bias, σ, drift")
+    p.add_argument("run", nargs="?", help="run name or any of its CSV files (default: the newest run)")
+    p.add_argument("--list", action="store_true", help="list the saved runs")
+    p.set_defaults(fn=cmd_tunnel)
 
     a = ap.parse_args(argv)
     a.fn(a)
