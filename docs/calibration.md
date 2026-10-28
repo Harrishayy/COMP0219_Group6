@@ -1,5 +1,8 @@
 # Calibration procedure
 
+The formulas behind each step, the drag coefficient for each body shape and what to redo when something changes
+are in [formulas.md](formulas.md).
+
 The estimate must run on the Nucleo, so calibration happens offline: fit constants on the PC, then compile
 them in (`calibration_generated.h`) or set them live (`SET`). The board only ever applies them.
 
