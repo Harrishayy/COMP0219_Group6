@@ -38,6 +38,11 @@ its reference and bench test. To show one of its readouts in the strip under the
 (`body.fit`): tiles share the height and their charts take what is left. Keep a tile to about four readouts and one
 chart; the full detail belongs on the sensor's page. Below that size the tiles stack and the page scrolls.
 
+**Results fits one screen too.** At 1100 × 800 and up, `#results` fills the viewport (`body.fit-results`, no
+readings strip): the run bar on top (verdict pill, score readouts), the timeline and the chosen moment on the left,
+What to do, By speed and Files on the right. It uses the same tile components; its layout rules are the
+`.results-*` classes in `css/app.css`. Below that size it stacks and scrolls.
+
 **Remove a sensor.** Delete its line in `js/sensors/index.js` (and any `OVERVIEW` entry for it).
 
 **Add wiring or a datasheet.** Give the module `wiring` (a spec from `js/wiring/parts/`), optionally
@@ -89,6 +94,7 @@ short class name, and add a row to the catalogue below.
 | Chart sizes     | `.chart` `.tall` `.short`               | TimeChart `range`, `cursor`, `shade`, `onPick` for recorded runs |
 | Time slider     | `.scrub`                                | under a timeline (Results)               |
 | File path       | `.path`                                 | breaks anywhere in a table cell          |
+| Results layout  | `.results` `.results-bar` `.results-body` `.results-col` `.results-moment` `.results-controls` `.results-scroll` `.results-files` | one screen with `body.fit-results` |
 | Toast           | `.toast`                                | results and board errors                 |
 | Banner          | `.banner` `.bad` `.warn`                | no board, silent board, simulator, replay |
 | Sub-tabs        | `.segmented.subtabs`                    | Bench, Wiring, Datasheet; `aria-selected` |

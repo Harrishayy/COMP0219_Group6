@@ -202,6 +202,32 @@ button.pill.rec { color: var(--bad); }
 .tile-check.ok { color: var(--ok); }
 .tile-check .tag { flex: none; }
 
+/* Results (js/pages/results.js): one saved run on one screen, from the same tiles. A run bar on top; the timeline
+   and the moment on the left; what to do, the error per speed and the files on the right */
+.results { display: flex; flex-direction: column; gap: var(--sp-4); }
+.results .tile-head > h2 { font: 800 var(--t-lg)/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+.results-bar { flex: none; }
+.results-bar .tile-head > h2 { font-size: var(--t-xl); letter-spacing: -0.01em; }
+.results-bar .select { flex: 0 1 26rem; min-width: 14rem; }
+.results-body { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(300px, 1fr); gap: var(--sp-4); }
+.results-col { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.results-col > .tile { flex: 0 0 auto; }
+.results .tile-chart { padding-bottom: var(--sp-1); }
+.results .tile-chart .chart { min-height: 150px; overflow: hidden; }
+.results .tile-chart.grow { flex-grow: 1.7; }
+.results .tile-chart.grow .chart { min-height: 220px; }
+.results-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+.results-controls .scrub { flex: 1 1 8rem; width: auto; }
+.results .check-item { padding: var(--sp-2) var(--sp-4); }
+.results-scroll { overflow: auto; min-height: 0; flex: 1; }
+.results-scroll .table td, .results-scroll .table th { padding-block: var(--sp-1); }
+.results-scroll > .table, .results-scroll > .empty { margin-inline: var(--sp-4); width: calc(100% - 2 * var(--sp-4)); }
+.results-files { padding: var(--sp-2) var(--sp-4) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.results-file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.results-file-list li { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); font-size: var(--t-xs); }
+.results-file-list .path, .results-dir { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
+@media (max-width: 1099px) { .results-body { grid-template-columns: minmax(0, 1fr); } }
+
 @media (min-width: 1100px) and (min-height: 680px) {
   body.fit { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
   body.fit .main { flex: 1; min-height: 0; padding-block: var(--sp-4); }
@@ -209,6 +235,27 @@ button.pill.rec { color: var(--bad); }
   body.fit .cockpit { flex-wrap: nowrap; }
   body.fit .tile { min-height: 0; overflow: hidden; }
   body.fit .tile-foot { flex: none; }
+}
+/* Results fills the screen from 1100 x 800 (it holds more than the dashboard); below that its tiles stack and scroll */
+@media (min-width: 1100px) and (min-height: 800px) {
+  body.fit-results { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  body.fit-results .main { flex: 1; min-height: 0; padding-block: var(--sp-4); }
+  body.fit-results .main > .wrap, body.fit-results #pages, body.fit-results #page-results, body.fit-results .results { height: 100%; }
+  body.fit-results .tile { min-height: 0; overflow: hidden; }
+  body.fit-results .tile-foot { flex: none; }
+  body.fit-results .results-body { flex: 1; min-height: 0; }
+  body.fit-results .results-col { min-height: 0; }
+  body.fit-results .results-col > .tile { flex: 1 1 0; }
+  body.fit-results .results-col > .results-moment { flex-grow: 1.7; }
+  body.fit-results .results-col.side > .tile.grow { flex: 1 1 0; display: flex; flex-direction: column; }
+  body.fit-results .results-col.side > .tile.todo { flex-grow: 1.4; }
+  body.fit-results .results-col.side > .tile.files { flex: none; }
+  body.fit-results .results .tile-chart .chart, body.fit-results .results .tile-chart.grow .chart { min-height: 64px; }
+}
+/* a shortish laptop screen: the notes under the numbers go, the charts keep the room */
+@media (min-width: 1100px) and (min-height: 800px) and (max-height: 860px) {
+  body.fit-results .results .tile-readouts .note { display: none; }
+  body.fit-results .results .tile-head { padding-block: var(--sp-2); }
 }
 @media (max-width: 1399px) { .tile-head .btn { display: none; } }
 

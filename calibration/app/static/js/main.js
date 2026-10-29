@@ -179,9 +179,11 @@ function go(route) {
   showPage(id);
   if (sub) mounted.get(id).page.show?.(sub);
   markTab(id);
-  // the dashboard fills the screen with no page scroll; the other pages scroll from the top
+  // the dashboard and Results fill the screen with no page scroll (Results from a taller screen: it holds more); the
+  // other pages scroll from the top. Results is about a saved run, so the live readings strip stays off there too
   document.body.classList.toggle('fit', id === DASH);
-  strip.el.hidden = id === DASH;
+  document.body.classList.toggle('fit-results', id === results.id);
+  strip.el.hidden = id === DASH || id === results.id;
   if (changed) window.scrollTo(0, 0);
 }
 
