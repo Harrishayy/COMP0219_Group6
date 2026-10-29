@@ -6,6 +6,10 @@ ZERO_S with the fan off (as the logger does at start-up), then yields |dp − of
 --gt-pressure, so the server turns each sample into v = √(2·dp/ρ) with the board's ρ (the logger uses C = 1 and
 the ρ typed into its window). The box streams whole pascals about 5 times a second.
 
+The cell is the logger's choice (1.0.1): cell CELL if it reports, else the only other AFA5 cell that does. The white
+tunnel's cell 1 broke in October 2026, so it reads cell 2. If the cell in use changes mid-run, it zeroes again, as
+the logger does: each cell has its own offset.
+
 Only one program can drive the box: close the logger and TecQuipment's VDAS software first.
 """
 from __future__ import annotations
@@ -38,23 +42,33 @@ def zero_offset(samples: list[float]) -> tuple[float, str]:
     return mean, f"offset {mean:+.2f} Pa"
 
 
-def read_pa():
-    reader = _vdas_module().GroundTruthReader(cell=CELL)   # raises RuntimeError when the box is not plugged in
+def read_pa(reader=None):
+    if reader is None:
+        reader = _vdas_module().GroundTruthReader(cell=CELL)   # raises RuntimeError when the box is not plugged in
     q: queue.Queue = queue.Queue()
-    reader.add_listener(lambda r: r["valid"] and q.put((r["t"], float(r["pa"]))))
+    reader.add_listener(lambda r: r["valid"] and q.put((r["t"], float(r["pa"]), r["cell"])))
     try:
-        zero, t_end = [], None
-        while t_end is None or (zero and zero[-1][0] < t_end):
-            t, pa = q.get(timeout=10)                       # no data for 10 s: let the adapter reopen the box
-            t_end = t_end or t + ZERO_S
-            zero.append((t, pa))
-        offset, note = zero_offset([pa for _, pa in zero])
-        print(f"VDAS zero: {note}")
-        while reader.is_plugged():
-            try:
-                _, pa = q.get(timeout=1)
-            except queue.Empty:
-                continue
-            yield abs(pa - offset)
+        while True:
+            zero, t_end, cell = [], None, None
+            while t_end is None or (zero and zero[-1][0] < t_end):
+                t, pa, c = q.get(timeout=10)                    # no data for 10 s: let the adapter reopen the box
+                if c != cell:                                   # a new cell: its own zero, from its first reading
+                    zero, t_end, cell = [], None, c
+                t_end = t_end or t + ZERO_S
+                zero.append((t, pa))
+            offset, note = zero_offset([pa for _, pa in zero])
+            why = "" if cell == CELL else f" (cell {CELL} sends nothing)"
+            print(f"VDAS zero on pressure cell {cell}{why}: {note}", flush=True)
+            while reader.is_plugged():
+                try:
+                    _, pa, c = q.get(timeout=1)
+                except queue.Empty:
+                    continue
+                if c != cell:
+                    print(f"VDAS: pressure cell {c} took over from cell {cell}: zeroing again (stop the fan)", flush=True)
+                    break
+                yield abs(pa - offset)
+            else:
+                return
     finally:
         reader.close()
