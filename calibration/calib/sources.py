@@ -153,6 +153,7 @@ class SerialSensorSource(Source):
     Nucleo to be plugged in and follows it to whatever device name it gets."""
 
     name = "sensor-serial"
+    ROW_S = 1 / 200.0  # the board sends one row per 5 ms tick (board_config.h kSampleHz)
 
     def __init__(self, port: str, baud: int = 115200, on_sensor=_noop, on_info=_noop,
                  on_cal=_noop, debug_mode: bool = True):
@@ -165,6 +166,7 @@ class SerialSensorSource(Source):
         self._ser = None
         self._tx_lock = threading.Lock()
         self.tap = None  # called with every chunk read, as read: the relay to the Wind Tunnel Logger (calib/relay.py)
+        self._last_row_t = 0.0
         self.lines = 0
         self.data_rows = 0
         self.last_line_t: float | None = None  # perf_counter of the last line, for "port open but silent"
@@ -301,8 +303,7 @@ class SerialSensorSource(Source):
                         *lines, buf = buf.split(b"\n")
                         if len(buf) > 4096:  # no newline for a long time: garbage, resync
                             buf = b""
-                        for ln in lines:
-                            self._handle(t, ln)
+                        self._handle_chunk(t, lines)
             except Exception as e:
                 busy = isinstance(e, serial.SerialException) and ("lock" in str(e).lower() or "busy" in str(e).lower())
                 self.status = ("in use by another program (another dashboard or serial monitor): close it"
@@ -311,6 +312,19 @@ class SerialSensorSource(Source):
                 self._ser, self.connected = None, False
             self._stop.wait(backoff)
             backoff = min(backoff * 2, 5.0)
+
+    def _handle_chunk(self, t, lines):
+        """USB delivers the board's rows a few at a time, so they arrive together: each row is stamped one tick
+        before the next, back from the chunk's arrival, never before the previous row."""
+        rows_left = sum(1 for ln in lines if ln.strip() and not ln.lstrip().startswith(b"#"))
+        for ln in lines:
+            if ln.strip() and not ln.lstrip().startswith(b"#"):
+                rows_left -= 1
+                tr = max(t - rows_left * self.ROW_S, self._last_row_t + 1e-6)
+                self._last_row_t = tr
+                self._handle(tr, ln)
+            else:
+                self._handle(t, ln)
 
     def _handle(self, t, ln):
         self.lines += 1

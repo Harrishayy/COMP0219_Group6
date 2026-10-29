@@ -1,4 +1,6 @@
 """(3) Serial line parsing: '#' lines are never data, #cols resyncs columns, garbage is dropped."""
+import pytest
+
 from calib.sources import LineParser
 
 
@@ -31,3 +33,18 @@ def test_cols_header_resyncs_and_garbage_is_dropped():
     for junk in ("", "   ", "\x00\x00", "abc", "1.2.3", "3,0.5", "3,0.5,2.0,9", "nan", b"\xff\xfe", "5,6,x"):
         assert p.parse(junk) is None
     assert p.bad_lines > 0
+
+
+def test_rows_in_one_usb_chunk_get_their_own_times():
+    """USB hands over 2-3 rows at once: each gets its own time, 5 ms apart, ending at the chunk's arrival, and
+    times never go backwards across chunks."""
+    from calib.sources import SerialSensorSource
+
+    got = []
+    s = SerialSensorSource("/dev/null-board", on_sensor=lambda t, row: got.append(t))
+    s._handle_chunk(10.000, [b"#cols,n,feature,rho,temp_c,pressure_pa,v"])
+    s._handle_chunk(10.020, [b"1,0.1,1.19,22,nan,3.0\r", b"2,0.1,1.19,22,nan,3.0\r", b"#ok sqrt_k=242.5\r",
+                             b"3,0.1,1.19,22,nan,3.0\r"])
+    s._handle_chunk(10.021, [b"4,0.1,1.19,22,nan,3.0\r", b"5,0.1,1.19,22,nan,3.0\r"])
+    assert got[:3] == pytest.approx([10.010, 10.015, 10.020])
+    assert got[3] > got[2] and got[4] == pytest.approx(10.021)
