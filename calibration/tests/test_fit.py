@@ -48,3 +48,16 @@ def test_diagnose_names_the_static_error():
     fix = wrong["static_refit"]["apply"]
     assert fix["sqrt_k"] == pytest.approx(k, rel=0.03) and fix["sqrt_x0"] == pytest.approx(x0, abs=0.03 * abs(x0) + 1e-3)
     assert not [f for f in findings(sqrt_k=k, sqrt_x0=x0).values() if f["severity"] == "high"]
+
+
+def test_tunnel_fit_absorbs_an_unscaled_load_cell():
+    """A load cell never scaled with masses (the board reads 40 g as 17.5 g): the tunnel fit still makes the speed
+    right, by folding the scale error into sqrt_k."""
+    sim = SimulatedTunnel(profile="sweep", seed=3)
+    sim.board["lc_n_per_count"] = sim.truth.lc_n_per_count / 2.3
+    run = sim.generate(80)
+    k_true, _ = _truth(sim)
+    r = fit.fit_run(models.default_params(), run, "robust_lsq")
+    assert r.ok, r.message
+    assert r.params["sqrt_k"] == pytest.approx(k_true, rel=0.02)
+    assert r.after["rmse"] < 0.15

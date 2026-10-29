@@ -56,10 +56,16 @@ the flow at our Reynolds numbers (Hoerner, *Fluid-Dynamic Drag*, 1965; ±5 %):
 | Hollow hemisphere, round side to the wind | π·d²/4 (rim) | 0.38 | Ø10 cm: 30 cm² | 670 | 0.7 g / 18 g |
 | Solid hemisphere, flat face to the wind | π·d²/4 | 1.17 | | | |
 | Sphere | π·d²/4 | 0.47 (Re < 2·10⁵) | Ø7 cm: 18 cm² · Ø8 cm: 24 cm² | 1106 · 847 | Ø8: 0.6 g / 14.5 g |
-| Hollow hemisphere Ø8 cm, open side to the wind | 50.3 cm² | 1.42 | 71 cm² | 280 | 1.8 g / 44 g |
+| **Ours** (catapult.stl): hollow hemisphere Ø86 mm outside (Ø80 inside, 3 mm wall), open side to the wind | 58.1 cm² | 1.42 | 82.5 cm² | 242.5 (`CAL_SQRT_K`) | 2.0 g / 50 g |
 
 (ρ = 1.20 kg/m³.) What this means for a design:
 
+- A hemisphere's A is its **outer** diameter, wall included: the wind sees the whole rim. Measured from
+  catapult.stl (projected along the flow), the cup is 5 805 mm², a Ø86.0 mm disc. Using the inner Ø80 mm
+  (50.3 cm²) would make Cd·A 15 % small and every speed read 7.5 % high.
+- The part's 15.2 mm square arm sticks out past the cup by another 590 mm² of frontal area. If it sits in the flow
+  and its drag reaches the cell, that adds roughly 8–12 cm² to Cd·A (Cd 1.3–2 for a short square bar face-on), so
+  the table's value reads about 5–7 % high until the tunnel fit, which measures it.
 - A hollow hemisphere with its open side to the wind gives about 20 % more force than a flat disc of the same
   diameter, and about the same as a square plate whose side equals the diameter. Turned round, it gives a quarter
   of the force: mount it the right way and keep it square to the flow.

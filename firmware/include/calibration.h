@@ -33,12 +33,13 @@
 #endif
 
 // ---- Square-root model for the drag plate: v = sqrt(sqrt_k * (F - sqrt_x0) / rho) --------
-// sqrt_k = 2 / (Cd * A), A in m². The default is a 10 x 10 cm flat plate (Cd 1.17, Cd*A = 117 cm²), so
-// about 2.9 g of drag at 2 m/s and 70 g at 10 m/s. It must stay equal to the toolkit's default
+// sqrt_k = 2 / (Cd * A), A in m². The default is our body, the hollow hemisphere open to the wind (catapult.stl:
+// 86 mm outside, 80 mm inside; Cd 1.42 on the outer rim's 58.1 cm², Cd*A = 82.5 cm²), so about 2.0 g of drag at
+// 2 m/s and 50 g at 10 m/s; the arm is not included. It must stay equal to the toolkit's default
 // (calibration/calib/models.py, test_chain.py checks): 1.0 would mean a 2 m² plate, so a few hundred grams
 // would read as 2 m/s.
 #ifndef CAL_SQRT_K
-#define CAL_SQRT_K 171.0f
+#define CAL_SQRT_K 242.5f
 #endif
 #ifndef CAL_SQRT_X0
 #define CAL_SQRT_X0 0.0f

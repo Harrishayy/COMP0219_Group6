@@ -18,18 +18,20 @@ const RESPONSE_WINDOW_S = 60;
 const MSE_GOOD = 0.05, MSE_OK = 0.2;
 
 const FORCE_TOL = 0.01, SPEED_TOL = 0.05;   // known-force check: 1 % on force, 0.05 m/s (or 1 %) on speed
-const SUGGESTED_G = [3, 20, 50];              // ≈ 2, 5.3 and 8.3 m/s on a 10 × 10 cm plate
+const SUGGESTED_G = [3, 20, 50];              // ≈ 2.4, 6.3 and 10 m/s on the Ø86 mm cup
 const CDA_SANE_CM2 = [10, 1000];              // a Cd·A outside this is not a plate that fits the 30 cm envelope
 const DRIFT_S = 2;                            // moving mean of the error in the 2 min view
 
 // The body on the load cell. Cd is for the frontal area A (cm² from dimensions in cm), sharp-edged and square to the
-// flow (Hoerner; docs/formulas.md §3). `range` is where a tunnel-fitted Cd should land for that shape.
+// flow (Hoerner; docs/formulas.md §3): a hemisphere's is its outer diameter, wall included. `range` is where a
+// tunnel-fitted Cd should land for that shape. Our body is the Ø86 mm cup (catapult.stl), the default.
+const OUR_BODY = { shape: 'cup', dims: [8.6] };
 const circle = ([d]) => (Math.PI * d * d) / 4;
 const SHAPES = {
   rect: { label: 'Flat plate (square or rectangle)', cd: 1.17, range: [1.05, 1.35], dims: ['Width', 'Height'], area: ([w, ht]) => w * ht },
   disc: { label: 'Flat disc', cd: 1.17, range: [1.05, 1.3], dims: ['Diameter'], area: circle },
-  cup: { label: 'Hollow hemisphere, open side to the wind', cd: 1.42, range: [1.25, 1.55], dims: ['Rim diameter'], area: circle },
-  dome: { label: 'Hollow hemisphere, round side to the wind', cd: 0.38, range: [0.3, 0.5], dims: ['Rim diameter'], area: circle },
+  cup: { label: 'Hollow hemisphere, open side to the wind', cd: 1.42, range: [1.25, 1.55], dims: ['Outer rim diameter'], area: circle },
+  dome: { label: 'Hollow hemisphere, round side to the wind', cd: 0.38, range: [0.3, 0.5], dims: ['Outer rim diameter'], area: circle },
   sphere: { label: 'Sphere', cd: 0.47, range: [0.4, 0.55], dims: ['Diameter'], area: circle },
 };
 
@@ -39,9 +41,9 @@ function loadBody() {
   try {
     const b = JSON.parse(localStorage.getItem('calib.body') || 'null');
     if (b && SHAPES[b.shape] && b.dims?.every((x) => x > 0)) return b;
-    const side = Math.sqrt(Number(localStorage.getItem('calib.plateAreaCm2')) || 100);  // before shapes existed
-    return { shape: 'rect', dims: [side, side] };
-  } catch { return { shape: 'rect', dims: [10, 10] }; }
+    const old = Number(localStorage.getItem('calib.plateAreaCm2'));  // before shapes existed
+    return old > 0 ? { shape: 'rect', dims: [Math.sqrt(old), Math.sqrt(old)] } : OUR_BODY;
+  } catch { return OUR_BODY; }
 }
 function saveBody() {
   try { localStorage.setItem('calib.body', JSON.stringify(S.body)); } catch { /* storage blocked: keep in memory */ }

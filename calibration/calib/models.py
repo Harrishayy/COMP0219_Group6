@@ -56,10 +56,10 @@ class ParamSpec:
 
 
 PARAMS = (
-    ParamSpec("sqrt_k", 171.0, 1.0, 5000.0, 0.1, "1/m²", "k = 2/(Cd·A)", "static"),
+    ParamSpec("sqrt_k", 242.5, 1.0, 5000.0, 0.1, "1/m²", "k = 2/(Cd·A)", "static"),
     ParamSpec("sqrt_x0", 0.0, -1.0, 1.0, 0.0001, "N", "Zero-flow force F0", "static"),
     ParamSpec("lc_offset", 0.0, -1e7, 1e7, 1.0, "counts", "Load-cell tare (set by TARE)", "board"),
-    ParamSpec("lc_n_per_count", 2.0e-5, 1e-8, 1e-2, 1e-8, "N/count", "Load-cell scale (from `calib weights`)", "board"),
+    ParamSpec("lc_n_per_count", 1.0e-5, 1e-8, 1e-2, 1e-8, "N/count", "Load-cell scale (from `calib weights`)", "board"),
     ParamSpec("filter_kind", 1.0, 0.0, 1.0, 1.0, "", "Output smoother: 1 = EMA on ema_alpha, 0 = Butterworth on lpf_hz", "dynamics"),
     ParamSpec("ema_alpha", 0.2, 0.0001, 1.0, 0.0001, "", "EMA weight of the newest sample: V = a·V_new + (1−a)·V_prev", "dynamics"),
     ParamSpec("lpf_hz", 10.0, 0.0, 99.0, 0.1, "Hz", "Butterworth cutoff (2nd order: damps the plate's ringing)", "dynamics"),
