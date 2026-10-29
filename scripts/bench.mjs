@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // One-command launcher for the calibration bench, used by the package.json scripts:
 //
-//   pnpm dev                 dashboard on the Nucleo; with no board plugged in it says so and waits for one
+//   pnpm dev                 dashboard on the Nucleo, with the GIGA pitot tube as ground truth (each waits until
+//                            plugged in); --gt-vdas for the white tunnel's VDAS box, --no-gt for none
 //   pnpm dev:board           the same (kept for habit); BENCH_PORT=/dev/… picks the port
 //   pnpm dev:sim             dashboard on the simulator (every reading synthetic, and labelled as such)
 //   pnpm test                calibration tests
@@ -97,8 +98,17 @@ async function freeHttpPort() {
   fail(`ports ${DEFAULT_HTTP_PORT}–${DEFAULT_HTTP_PORT + 19} are all in use; pass --http-port`);
 }
 
+// Ground truth: the GIGA pitot tube unless another source is named (--gt-vdas, --gt-cmd, …) or --no-gt is given.
+function withGroundTruth(extra) {
+  if (extra.includes('--no-gt')) return extra.filter((a) => a !== '--no-gt');
+  if (extra.some((a) => a.startsWith('--gt-') && !['--gt-p-pa', '--gt-tair-c', '--gt-baud', '--gt-pressure'].includes(a))) return extra;
+  if (extra.includes('--sim') || extra.includes('--replay')) return extra;
+  return [...extra, '--gt-giga'];
+}
+
 async function serve(board, extra) {
   ensurePython();
+  if (board) extra = withGroundTruth(extra);
   const args = ['-m', 'calib', 'serve', ...extra];
   if (board && !extra.includes('--port') && !extra.includes('--sim') && !extra.includes('--replay')) args.push('--port', findBoardPort());
   if (!board && !extra.includes('--sim') && !extra.includes('--port') && !extra.includes('--replay')) args.push('--sim');

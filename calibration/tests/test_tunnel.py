@@ -105,3 +105,141 @@ def test_giga_rejected_zero_keeps_reading():
     g.on_line("#EVT zero_reject reason=unsteady mean_pa=3.1", 8.0)
     assert any("refused the zero" in n for n in g.notes)
     assert g.on_line("1,2,0.5,12.0,4.4,23,0", 8.1)[1] == 12.0
+
+
+def _afa5(cell, pa):
+    """A VDAS-F HID report from AFA5 cell `cell` (vdas_afa5.py protocol): 16-bit sign-magnitude Pa."""
+    raw = (0x8000 | -pa) if pa < 0 else pa
+    return [0, cell << 3, 1, 2, raw >> 8, raw & 0xFF] + [0] * 58
+
+
+def test_vdas_reads_cell_2_when_cell_1_is_silent(monkeypatch):
+    """The white tunnel's cell 1 broke: the logger's 1.0.1 reader picks cell 2, and --gt-vdas zeroes and reads it."""
+    import threading
+    import time
+
+    from calib import vdas_gt
+
+    mod = vdas_gt._vdas_module()
+    monkeypatch.setattr(vdas_gt, "ZERO_S", 0.3)
+
+    class Box(mod.GroundTruthReader):
+        """The logger's reader with the HID device replaced by a script of reports."""
+        def __init__(self, script):
+            self.preferred, self.cell, self.last_report = 1, None, 0.0
+            self._seen, self._first, self._listeners, self._alive = [0.0] * 8, 0.0, [], True
+            self._thread = threading.Thread(target=self._play, args=(script,), daemon=True)
+            self._thread.start()
+
+        def _play(self, script):
+            time.sleep(0.05)
+            for cell, pa, dt in script:
+                r = self.handle(_afa5(cell, pa), time.time())
+                if r:
+                    for cb in list(self._listeners):
+                        cb(r)
+                time.sleep(dt)
+            self._alive = False
+
+        def close(self):
+            self._alive = False
+
+    # cell 2 only: fan off at +2 Pa for 2 s (the first 1.5 s waits for cell 1), then 40 Pa; then cell 2 goes quiet
+    # and cell 3 takes over with its own offset (-1 Pa)
+    script = [(2, 2, 0.05)] * 40 + [(2, 42, 0.05)] * 20 + [(3, -1, 0.05)] * 70 + [(3, 29, 0.05)] * 20
+    box = Box(script)
+    got = list(vdas_gt.read_pa(box))
+    assert box.cell == 3
+    assert set(got) == {0, 40, 30}                  # fan off reads 0 on each cell after its own zero
+    assert got.index(30) > len(got) - 25 > got.index(40)   # cell 2 minus its +2 Pa, then cell 3 minus its -1 Pa
+
+
+def test_giga_defers_to_the_logger_on_the_relay():
+    """With the Wind Tunnel Logger on the GIGA relay, the logger drives the GIGA: our settings wait for its answer to
+    a #HELLO and are dropped when it gives one; our start-up zero is left to it; without it, ours go out late."""
+    from calib.giga_gt import DEFER_S, Giga
+
+    g = Giga()
+    g.on_line("#HELLO GIGA", 0.0)
+    g.on_line("#CFG leq_m=102.177 c=1", 0.1)
+    assert g.tick(0.5) == ["ZERO"]
+    g.on_line("#EVT zero_ok zero_pa=0.02", 3.0)
+    g.logger_command("INFO", 10.0)                                   # the logger connects
+    assert g.on_line("#HELLO GIGA", 10.05)[0] == []                  # ours wait…
+    g.logger_command("LEQ 102.177", 10.1)                            # …and the logger answers
+    assert g.tick(10.05 + DEFER_S + 0.1) == []
+    assert g.on_line("#HELLO GIGA", 20.0)[0] == []                   # a reset with the logger gone quiet
+    assert g.tick(20.0 + DEFER_S + 0.1)[-1] == "ZERO SET 0.02"       # ours go out, with the zero
+    assert g.tick(30.0) == []                                        # and no zero of our own while it drives
+
+
+def test_giga_relay_passes_the_loggers_commands_on(tmp_path):
+    import os
+
+    serial = pytest.importorskip("serial")
+    if os.name != "posix":
+        pytest.skip("pseudo-terminals are POSIX only")
+    from calib import relay
+
+    r = relay.BoardRelay(tmp_path / ".giga-relay", keep_input=True)
+    try:
+        with serial.Serial(str(tmp_path / ".giga-relay"), 115200, timeout=0.5) as s:
+            r.write(b"#HELLO GIGA\n")
+            assert s.readline() == b"#HELLO GIGA\n"
+            s.write(b"LEQ 102.177\nZERO\n")   # no flush(): on a pty it waits for the other end, as the logger never does
+            import time
+            time.sleep(0.05)
+            assert r.take_input() == b"LEQ 102.177\nZERO\n"
+    finally:
+        r.close()
+
+
+def test_giga_adapter_runs_as_the_server_loads_it(monkeypatch):
+    """GroundTruthSource loads giga_gt.py as a file, outside the package (a relative import broke it once): driven
+    through that loader against a scripted GIGA, it sends the settings, zeroes and yields the pressure."""
+    import os
+    import threading
+    import time
+    import tty
+    from pathlib import Path
+
+    if os.name != "posix":
+        pytest.skip("pseudo-terminals are POSIX only")
+    pytest.importorskip("serial")
+    from calib.sources import GroundTruthSource
+
+    m, s = os.openpty()
+    tty.setraw(s)
+    got, stop = [], threading.Event()
+
+    def giga():
+        buf, leq = b"", 0.0
+        while not stop.is_set():
+            os.set_blocking(m, False)
+            try:
+                buf += os.read(m, 1024)
+            except BlockingIOError:
+                pass
+            *lines, buf = buf.split(b"\n")
+            for ln in lines:
+                cmd = ln.decode().strip()
+                got.append(cmd)
+                reply = {"INFO": "#HELLO GIGA", "ZERO": "#EVT zero_ok zero_pa=0.01"}.get(cmd)
+                if cmd.startswith("LEQ "):
+                    leq = float(cmd[4:])
+                    reply = f"#CFG leq_m={leq:.3f} c=1.000"
+                if reply:
+                    os.write(m, (reply + "\n").encode())
+            os.write(m, b"1,0,24.01,24.0,6.3,23,0\n")
+            time.sleep(0.01)
+
+    threading.Thread(target=giga, daemon=True).start()
+    monkeypatch.setenv("CALIB_GIGA_PORT", os.ttyname(s))
+    fn = GroundTruthSource(module=f"{Path(__file__).parents[1] / 'calib' / 'giga_gt.py'}:read_pa")._load_callable()
+    try:
+        gen = fn()
+        assert next(gen) == 24.0
+        assert {"LEQ 102.177", "C 1", "ZERO"} <= set(got)
+        gen.close()
+    finally:
+        stop.set()

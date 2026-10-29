@@ -1,7 +1,7 @@
 # Recordings and exports are generated locally; keep the calibration you ship by committing it elsewhere.
 runs/
-.board-relay
-.board-relay.tmp
+.board-relay*
+.giga-relay*
 exports/
 *.log
 __pycache__/

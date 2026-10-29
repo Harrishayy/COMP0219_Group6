@@ -161,6 +161,7 @@ class Engine:
         self._rec_log: dict | None = None  # raw tunnel and board samples while recording, for the logger's files
         self.last_tunnel_run: dict | None = None  # {name, dir} the last stopped recording was also saved as
         self.relay: BoardRelay | None = None  # the board's stream for the Wind Tunnel Logger (calib/relay.py)
+        self._relay_state = "off"  # "wanted" in live mode until the board's first bytes create it, then "on"/"failed"
         self.auto_push = False
         self.last_fit: dict | None = None
         self.sim: SimulatedTunnel | None = None
@@ -417,13 +418,10 @@ class Engine:
 
     # ---------------------------------------------------------------------------------- lifecycle
     def start(self):
-        if self.mode == "live" and relay.available() and not self.relay:
-            try:
-                self.relay = BoardRelay()
-                print(f"Wind Tunnel Logger: the board is also on {relay.LINK} (pnpm logger, port "
-                      f"\"{relay.LABEL}\"); give the logger the tunnel's ground truth, not this dashboard")
-            except OSError as e:
-                self.info.append(f"#relay for the Wind Tunnel Logger not available: {e}")
+        # The relay is made when the board's first bytes arrive, not here: a second dashboard (or a test) that cannot
+        # open the board never takes the relay's name from the one that has it. Never relay the relay to itself.
+        if self.mode == "live" and relay.available() and str(self._cfg.get("sensor_port")) != str(relay.LINK):
+            self._relay_state = "wanted"
         for s in self.sources:
             s.start()
 
@@ -432,14 +430,26 @@ class Engine:
             s.stop()
         if self.recorder:
             self.recorder.close()
+        self._relay_state = "off"
         if self.relay:
             self.relay.close()
             self.relay = None
 
     def _relay_write(self, chunk: bytes):
         r = self.relay
-        if r:
-            r.write(chunk)
+        if r is None:
+            if self._relay_state != "wanted":
+                return
+            try:
+                r = self.relay = BoardRelay()
+                self._relay_state = "on"
+                print(f"Wind Tunnel Logger: the board is also on {relay.LINK} (pnpm logger, port "
+                      f"\"{relay.LABEL}\"); give the logger the tunnel's ground truth, not this dashboard", flush=True)
+            except OSError as e:
+                self._relay_state = "failed"
+                self.info.append(f"#relay for the Wind Tunnel Logger not available: {e}")
+                return
+        r.write(chunk)
 
     # ------------------------------------------------------------------------------------ params
     def _mark(self, kind: str, before: dict, detail=None):

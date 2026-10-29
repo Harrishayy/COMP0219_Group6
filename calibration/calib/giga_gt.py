@@ -11,10 +11,15 @@ the board's ρ (the logger uses C = 1 and the ρ typed into its window). About 1
 The CLI passes its settings in the environment: CALIB_GIGA_PORT (empty: the first Arduino on USB), CALIB_GIGA_P_PA
 and CALIB_GIGA_TAIR_C (the day's pressure and air temperature, as typed into the logger).
 
-Only one program can own the GIGA's port: close the logger first.
+The GIGA's port is opened exclusively. To run the course's Wind Tunnel Logger at the same time, the GIGA is shared
+through `calibration/.giga-relay` (calib/relay.py), which run.py offers as the logger's GIGA: everything the GIGA
+sends goes to both, and the logger's commands go to the GIGA. The logger is in charge while it is there: after a
+#HELLO it sends its own settings (with the P and TAIR typed into its window), so ours wait DEFER_S and are dropped
+if it answered; it zeroes the GIGA itself, so ours is not sent.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import time
 
@@ -27,6 +32,8 @@ SETTLE_S = 0.3                  # rows already queued under the old settings can
 RESEND_S = 2.0                  # its #CFG still shows another LEQ or C this long after ours: send again
 ZERO_RETRY_S = 6.0              # a zero takes 2.2 s: no answer by then, send ZERO again
 SILENT_S = 10.0                 # nothing for this long: let the adapter reopen the port
+DEFER_S = 1.0                   # with the logger on the relay: how long its answer to a #HELLO may take
+LOGGER_QUIET_S = 3.0            # the logger has written nothing this long: ours may put the calibration back
 
 
 def cmd_number(x) -> str:
@@ -56,9 +63,28 @@ class Giga:
         self.zeroed = False                            # zero answered (accepted or rejected)
         self.zero_sent: float | None = None
         self.notes: list[str] = []
+        self.logger_wrote = 0.0                        # last command from the Wind Tunnel Logger on the relay
+        self._pending: tuple[float, float, list[str]] | None = None   # (hello time, due, commands)
+
+    def logger_command(self, cmd: str, now: float):
+        """The logger sent `cmd` to the GIGA through the relay: it is driving the GIGA."""
+        if cmd.startswith("ZERO") and self.logger_wrote == 0.0:
+            self.notes.append("GIGA: the Wind Tunnel Logger is driving it (its settings and zero)")
+        self.logger_wrote = now
 
     def tick(self, now: float) -> list[str]:
-        """Commands due before the next read: the start-up zero, once the settings are in."""
+        """Commands due before the next read: settings deferred to the logger, the start-up zero."""
+        if self._pending:
+            t_hello, due, cmds = self._pending
+            if self.logger_wrote > t_hello:            # the logger answered the #HELLO itself
+                self._pending = None
+            elif now >= due:
+                self._pending = None
+                self.notes.append(f"GIGA: sent {', '.join(cmds)}")
+                return cmds
+            return []
+        if self.logger_wrote:                          # the logger zeroes the GIGA itself
+            return []
         if self.hello and self.ready and now >= self.ready_from and not self.zeroed:
             if self.zero_sent is None or now - self.zero_sent > ZERO_RETRY_S:
                 self.zero_sent = now
@@ -94,6 +120,9 @@ class Giga:
             if self.zero_pa is not None:               # the board reset: give it its zero back
                 cmds.append(f"ZERO SET {cmd_number(self.zero_pa)}")
             self.sent_at = now
+            if self.logger_wrote:                      # the logger answers too: give it DEFER_S to do so
+                self._pending = (now, now + DEFER_S, cmds)
+                return []
             self.notes.append(f"GIGA: sent {', '.join(cmds)}")
             return cmds
         if line.startswith("#CFG"):
@@ -106,7 +135,8 @@ class Giga:
             if have == self.want and not self.ready:
                 self.ready_from = now + SETTLE_S
                 self.notes.append(f"GIGA: LEQ {have[0]:g} m, C {have[1]:g} set")
-            elif have != self.want and now - self.sent_at > RESEND_S:   # changed behind our back: put ours back
+            elif (have != self.want and now - self.sent_at > RESEND_S
+                  and now - self.logger_wrote > LOGGER_QUIET_S):  # changed behind our back: put ours back
                 cmds, self.sent_at = list(self.calibration), now
                 self.notes.append(f"GIGA has LEQ {have[0]:g} m, C {have[1]:g}: sending ours again")
             self.ready = have == self.want
@@ -142,12 +172,25 @@ def _env_float(name: str, default: float | None) -> float | None:
     return None if v.lower() == "off" else float(v)
 
 
+def _wait_for_port() -> str:
+    """The GIGA's port: CALIB_GIGA_PORT, else the first Arduino on USB, waiting quietly until one is plugged in."""
+    said = False
+    while True:
+        port = os.environ.get("CALIB_GIGA_PORT", "").strip() or find_port()
+        if port:
+            return port
+        if not said:
+            print("GIGA pitot tube: waiting for one on USB (the wood tunnel's ground truth)", flush=True)
+            said = True
+        time.sleep(1.0)
+
+
 def read_pa():
     import serial
 
-    port = os.environ.get("CALIB_GIGA_PORT", "").strip() or find_port()
-    if not port:
-        raise RuntimeError("no GIGA pitot tube on USB (no Arduino found; pass --gt-giga PORT)")
+    from calib import relay  # absolute: GroundTruthSource loads this file on its own, outside the package
+
+    port = _wait_for_port()
     os.environ["CALIB_GIGA_PORT"] = port       # the same GIGA after a reconnect, and the port in the saved run
     link = Giga(_env_float("CALIB_GIGA_P_PA", P_PA), _env_float("CALIB_GIGA_TAIR_C", TAIR_C))
 
@@ -155,26 +198,45 @@ def read_pa():
         for c in cmds:
             ser.write((c + "\n").encode())
 
-    # 115200, never 1200: opening a GIGA at 1200 baud reboots it into its bootloader
-    with serial.Serial(port, 115200, timeout=0.2, write_timeout=0.5) as ser:
-        print(f"GIGA pitot tube on {port}")
-        buf, last = b"", time.monotonic()
-        while True:
-            now = time.monotonic()
-            send(ser, link.tick(now))
-            chunk = ser.read(ser.in_waiting or 1)
-            if not chunk:
-                if now - last > SILENT_S:
-                    raise TimeoutError(f"the GIGA on {port} sent nothing for {SILENT_S:g} s")
-                continue
-            last = now
-            buf += chunk
-            *lines, buf = buf.split(b"\n")
-            buf = buf[-4096:]
-            for raw in lines:
-                cmds, pa = link.on_line(raw.decode("ascii", "replace").strip(), now)
-                send(ser, cmds)
-                while link.notes:
-                    print(link.notes.pop(0))
-                if pa is not None:
-                    yield pa
+    # 115200, never 1200: opening a GIGA at 1200 baud reboots it into its bootloader. exclusive: never two readers.
+    with serial.Serial(port, 115200, timeout=0.05, write_timeout=0.5, exclusive=True) as ser:
+        share = relay.BoardRelay(relay.GIGA_LINK, keep_input=True) if relay.available() else None
+        if share:  # this reader thread is not joined at exit, so its finally may never run: close it then too
+            atexit.register(share.close)
+        print(f"GIGA pitot tube on {port}" + (f"; the Wind Tunnel Logger can use it too: {relay.GIGA_LINK}"
+                                              if share else ""), flush=True)
+        buf, rx, last = b"", b"", time.monotonic()
+        try:
+            while True:
+                now = time.monotonic()
+                if share:                          # the logger's commands, whole lines, to the GIGA
+                    rx += share.take_input()
+                    *cmds, rx = rx.split(b"\n")
+                    rx = rx[-4096:]
+                    for c in cmds:
+                        text = c.decode("ascii", "replace").strip()
+                        if text:
+                            link.logger_command(text, now)
+                            send(ser, [text])
+                send(ser, link.tick(now))
+                chunk = ser.read(ser.in_waiting or 1)
+                if not chunk:
+                    if now - last > SILENT_S:
+                        raise TimeoutError(f"the GIGA on {port} sent nothing for {SILENT_S:g} s")
+                    continue
+                last = now
+                if share:
+                    share.write(chunk)
+                buf += chunk
+                *lines, buf = buf.split(b"\n")
+                buf = buf[-4096:]
+                for raw in lines:
+                    cmds, pa = link.on_line(raw.decode("ascii", "replace").strip(), now)
+                    send(ser, cmds)
+                    while link.notes:
+                        print(link.notes.pop(0), flush=True)
+                    if pa is not None:
+                        yield pa
+        finally:
+            if share:
+                share.close()

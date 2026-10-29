@@ -95,7 +95,8 @@ Wind Tunnel Logger does (`tools/wind-tunnel-logger`, `calib/vdas_gt.py`): it zer
 start, then streams whole pascals about 5 times a second. Start it with the fan off, and close the logger first:
 one program drives the box.
 
-On the wood tunnel, `--gt-giga` (`pnpm dev --gt-giga`) drives its GIGA pitot tube the way the logger does
+On the wood tunnel, `--gt-giga` (what `pnpm dev` uses unless given another `--gt-*` or `--no-gt`) drives its GIGA
+pitot tube the way the logger does
 (`calib/giga_gt.py`): it sends the tube-loss calibration (LEQ 102.177 m, C 1) after every reset, zeroes it on the
 board with the fan off, then streams about 100 readings a second. Give the day's pressure and air temperature
 with `--gt-p-pa 100870 --gt-tair-c 22.5` (as typed into the logger), and `--gt-giga /dev/cu.usbmodemXXXX` if more
@@ -108,9 +109,12 @@ course's Score.py reads), listed in the Tunnel runs panel. For the assessed runs
 
 The logger can run beside the dashboard. `serve` on the board copies every byte the board sends to a virtual serial
 port, `calibration/.board-relay` (`calib/relay.py`; `BENCH_RELAY=0` turns it off; not on Windows), which
-`pnpm logger` lists as "Board via the dashboard". Give the logger the tunnel's ground truth (start the dashboard
-without `--gt-vdas`/`--gt-giga`: one program per tunnel box). The logger then logs and saves on its own Start/Stop,
-whatever Record does, and the dashboard keeps its force, ρ and settings. `serve --replay data/tunnel/<run>_aligned.csv` (or Replay in
+`pnpm logger` lists as "Board via the dashboard". The GIGA is shared too, both ways, on `calibration/.giga-relay`:
+the logger finds it as a GIGA pitot tube, picks it as its ground truth by itself, and drives it (its settings and
+zero go to the GIGA; ours step aside while it does). The VDAS box cannot be shared, so with `--gt-vdas` give the
+logger the box and start the dashboard with `--no-gt`. The logger logs and saves on its own Start/Stop, whatever
+Record does, and the dashboard keeps its force, ρ and settings. A relay counts only while the dashboard that made
+it runs (`<link>.pid`). `serve --replay data/tunnel/<run>_aligned.csv` (or Replay in
 the dashboard) plays a logger run through the calibration views.
 
 ## When the sensor disagrees with the pitot

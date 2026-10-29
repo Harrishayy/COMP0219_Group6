@@ -72,9 +72,11 @@ If the script prints pitot differential pressure in Pa instead of m/s, add `--gt
 latest ρ (`rho_ref` until one arrives).
 
 4. **VDAS** — `--gt-vdas`: the white tunnel's VDAS-F / AFA5 cell over USB HID, read with the Wind Tunnel
-   Logger's own `vdas_afa5.py` (tools/wind-tunnel-logger). `calib/vdas_gt.py:read_pa` averages 5 s with the fan
-   off (a mean beyond ±6 Pa is rejected for +3 Pa, as the logger does) and yields `|dp − offset|`; the flag
-   implies `--gt-pressure`. About 5 samples/s, whole Pa.
+   Logger's own `vdas_afa5.py` (tools/wind-tunnel-logger, 1.0.1). The cell is the logger's choice: cell 1 if it
+   reports, else the only other cell that does (cell 2 on the white tunnel since cell 1 broke). `calib/vdas_gt.py:
+   read_pa` averages 5 s with the fan off (a mean beyond ±6 Pa is rejected for +3 Pa, as the logger does), zeroes
+   again if the cell changes, and yields `|dp − offset|`; the flag implies `--gt-pressure`. About 5 samples/s,
+   whole Pa.
 5. **GIGA** — `--gt-giga [PORT]`: the wood tunnel's GIGA pitot tube (Arduino GIGA R1, WindSpeedGiga) over USB
    serial, found by its Arduino USB id unless PORT is given. `calib/giga_gt.py:read_pa` drives it as the logger's
    `GigaSource` does: after every `#HELLO` it sends `P` (`--gt-p-pa`), `LEQ 102.177`, `C 1`, `TAIR` (`--gt-tair-c`)
@@ -90,7 +92,15 @@ chunk read from the board, unchanged, to a pseudo-terminal reached through the s
 (`calib/relay.py`; replaced on start, removed on stop, so the logger reconnects to the same name after a restart).
 `tools/wind-tunnel-logger/run.py` adds it to the logger's port list as "Board via the dashboard". Bytes written by
 the reader are discarded; with no reader, the ~1 kB buffer is flushed instead of blocking. Telemetry `relay` is the
-link's path or null.
+link's path or null. The relay is made on the board's first bytes, so a server that cannot open the board never
+takes the name; `<link>.pid` names its owner, a link counts only while that process runs, and an owner puts its
+link back within 2 s if it is gone or dead.
+
+**GIGA relay.** `--gt-giga` opens the GIGA exclusively and shares it on `calibration/.giga-relay` both ways: every
+byte it sends goes to the reader, and the reader's command lines go to the GIGA. run.py lists it with the GIGA's USB
+id, hides the GIGA itself, and picks it as the logger's ground truth the first time one is offered. While the logger
+drives it (it wrote a command), our settings after a #HELLO wait 1 s and are dropped if it sent its own, and our
+start-up zero is left to it.
 
 Runs saved by the Wind Tunnel Logger itself (`<run>_aligned.csv`: `timestamp_epoch, ground_truth_mps,
 student_mps`, plus `_vdas.csv` and `_student.csv`) are read by `calib/tunnel.py` from `data/tunnel/` and

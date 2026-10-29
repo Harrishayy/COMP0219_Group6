@@ -7,12 +7,11 @@ calibration bench is for and its design principles are in `PRODUCT.md`.
 ## Run it
 
 ```bash
-pnpm dev          # dashboard on the Nucleo; with none plugged in it says so and waits (creates .venv on first run)
+pnpm dev          # dashboard on the Nucleo, GIGA pitot tube as ground truth; each waits until plugged in (creates .venv)
 pnpm dev:sim      # dashboard on the simulator; every page says the readings are synthetic
 pnpm test         # calibration tests + wiring circuit check (pnpm check:wiring alone)
 pnpm logger       # the course's Wind Tunnel Logger (assessed tunnel runs), saving to data/tunnel/; runs beside pnpm dev
-pnpm dev --gt-vdas   # dashboard with the white tunnel's VDAS box as live ground truth (fan off at start)
-pnpm dev --gt-giga   # the same on the wood tunnel, with its GIGA pitot tube
+pnpm dev --gt-vdas   # the white tunnel's VDAS box as ground truth instead (fan off at start); --no-gt for none
 cd firmware && pio run -e airspeed_drag_plate -t upload   # flash the competition build
 ```
 
@@ -41,7 +40,7 @@ Step progress kept in a sensor module resets on a reload. Firmware still needs `
 | `calibration/app/server.py` | Dashboard server | FastAPI + one websocket. Owns the serial port, runs the PC preview, fits, diagnosis, recording; serves `app/static/` |
 | `calibration/app/static/` | Dashboard UI | Plain ES modules, no build. A one-screen dashboard (a tile per sensor), a calibration page per sensor (`js/sensors/`: temperature, load cell, wind speed) under a strip of every reading, Runs. Keys 1–5 switch; Record is always in the bar. Its own guide: `calibration/app/static/CLAUDE.md` |
 | `calibration/calib/tunnel.py` | Wind Tunnel Logger runs | Reads `data/tunnel/*_aligned.csv`, scores the board against the tunnel, measures drift; `calib tunnel`, `/api/tunnel/*` |
-| `tools/wind-tunnel-logger/` | The TA's Wind Tunnel Logger v1.0.0, unmodified | Live board vs tunnel plot and the CSVs that are assessed. `run.py` only redirects its logs to `data/tunnel/`. Do not edit the package |
+| `tools/wind-tunnel-logger/` | The TA's Wind Tunnel Logger v1.0.1, unmodified | Live board vs tunnel plot and the CSVs that are assessed. `run.py` redirects its logs to `data/tunnel/` and lists the dashboard's board relay as a port. Do not edit the package |
 | `calibration/tests/` | Toolkit tests | Chain mirror vs a literal port of the C++, fits, parser, sessions, websocket smoke tests |
 | `host/` | Older stand-alone tools | Log, check the 200 Hz stream, live plot, score against ground truth, density. `pytest host` |
 | `docs/` | Brief, wiring (`hardware.md`), calibration procedure, every formula (`formulas.md`: drag, C_d by shape, density, filters, error budgets, what to redo when something changes) | `docs/datasheets/` PDFs, served at `/datasheets/` for the Datasheet tabs |
@@ -119,11 +118,12 @@ plus a row in the command table in `calibration/README.md`.
 **Tunnel session.** The assessed runs come from the Wind Tunnel Logger (`pnpm logger`, ground truth *Wind tunnel*
 on the white tunnel, *GIGA pitot tube* on the wood one). It reads the last number on each line as the speed, so
 the debug row ends in `v`; keep it last. To calibrate in the tunnel with force and ρ alongside, use
-`pnpm dev --gt-vdas` (white) or `pnpm dev --gt-giga` (wood) instead (one program at a time on the board's port and
-on the tunnel's box). Record there also saves the run in the logger's format in `data/tunnel/`. To run both at once,
-start `pnpm dev` without a `--gt-*` flag, then `pnpm logger` with the port "Board via the dashboard" and the tunnel as
-its ground truth: the dashboard copies the board's stream to `calibration/.board-relay` (`calib/relay.py`), and each
-program records on its own (stopping one never stops the other). Compare saved runs
+`pnpm dev` (GIGA pitot tube, the default) or `pnpm dev --gt-vdas` (white tunnel) instead. Record there also saves the
+run in the logger's format in `data/tunnel/`. Both run at once: with `pnpm dev` up, `pnpm logger` gets the board as
+"Board via the dashboard" (`calibration/.board-relay`) and picks the GIGA through the dashboard as its ground truth by
+itself (`calibration/.giga-relay`, both ways: the logger's settings and zero reach the GIGA and win over ours); each
+program records on its own, and stopping one never stops the other (`calib/relay.py`, `calib/giga_gt.py`). The VDAS
+box cannot be shared: with `--gt-vdas` the logger has no tunnel ground truth. Compare saved runs
 on the Wind speed page's Tunnel runs panel or with `calib tunnel`; "Replay" runs a logger run through the
 calibration views (live chart, accuracy, by speed, score, diagnosis; no force was logged, so no curve fit).
 
