@@ -5,7 +5,8 @@ them next to everything else. Arguments pass through: `--demo` runs a simulated 
 
 While the dashboard (pnpm dev) owns the board, its port list also offers "Board via the dashboard": the board's
 stream copied by the dashboard (calibration/calib/relay.py), so both run at once and each records on its own. The
-GIGA pitot tube is shared the same way, and is picked as the ground truth the first time one is offered.
+GIGA pitot tube is shared the same way, and is picked as the ground truth the first time one is offered; the board
+relay is connected as Your board when the window opens.
 
     pnpm logger            (installs requirements.txt into .venv on first run)
     pnpm logger --demo
@@ -92,6 +93,27 @@ def _prefer_giga(self, ports=None):
 
 
 app.MainWindow.update_giga_choices = _prefer_giga
+
+# Your board: while the dashboard shares the board, connect to it as soon as the window is up, as if "Board via the
+# dashboard" had been picked and Connect pressed (Disconnect and pick another port as usual).
+_init_with_logs = app.MainWindow.__init__
+
+
+def _init_with_board(self, cfg, settings, log_dir, simulated=False, fake_student=False):
+    _init_with_logs(self, cfg, settings, log_dir, simulated, fake_student)
+    if fake_student:
+        return
+
+    def connect():
+        i = self.cmb_port.findData(str(RELAY))
+        if _live(RELAY) and i >= 0 and self.student_reader is None:
+            self.cmb_port.setCurrentIndex(i)
+            self.toggle_student()
+
+    app.QtCore.QTimer.singleShot(0, connect)
+
+
+app.MainWindow.__init__ = _init_with_board
 
 if __name__ == "__main__":
     app.main()
