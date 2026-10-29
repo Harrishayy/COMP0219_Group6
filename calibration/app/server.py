@@ -721,7 +721,7 @@ class Engine:
             self.recorder = Session(self.params, meta, label=label or f"{self.mode}_drag_plate")
             return f"recording to {self.recorder.path}"
         if not on and self.recorder:
-            self.record_tick()
+            self.record_tick(final=True)
             rec, self.recorder = self.recorder, None
             p = rec.close()
             msg = f"saved {rec.rows} rows to {p} and {rec.json_path.name}"
@@ -735,9 +735,10 @@ class Engine:
             return f"{msg}; as a Wind Tunnel Logger run: {', '.join(f.name for f in files)} in {files[0].parent}" if files else msg
         return "recording unchanged"
 
-    def record_tick(self):
+    def record_tick(self, final: bool = False):
         """Append newly aligned rows to the session: each sensor sample gets GT interpolated onto it
-        (held back until GT has caught up) and the PC preview computed with the params in force now."""
+        (held back until GT has caught up; on stop, `final`, every row goes in) and the PC preview computed with the
+        params in force now."""
         rec = self.recorder
         if not rec:
             return
@@ -756,7 +757,7 @@ class Engine:
         if len(ts) == 0:
             return
         gt_last = tg[-1] if len(tg) else None
-        if gt_last is not None and time.perf_counter() - gt_last < 0.5:
+        if not final and gt_last is not None and time.perf_counter() - gt_last < 0.5:
             n = int(np.searchsorted(ts, gt_last, side="right"))
             ts, cols = ts[:n], {k: v[:n] for k, v in cols.items()}
             if n == 0:
