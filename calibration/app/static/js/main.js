@@ -4,8 +4,9 @@
 //   #dashboard   every sensor on one screen (core/dashboard.js); the default
 //   #<sensor>    that sensor's calibration page (core/sensor-page.js), #<sensor>/<sub-tab> for wiring or datasheet
 //   #runs        recordings, export, replay
+//   #results     saved tunnel runs: files, score, any moment at full resolution (#results/<run>)
 //
-// Keys 1–5 open the pages in top-bar order (not while typing). The strip keeps every sensor's readings in view on
+// Keys 1–6 open the pages in top-bar order (not while typing). The strip keeps every sensor's readings in view on
 // the sensor pages and Runs. The browser tab gets Sock as its icon, with a status dot.
 import { h, setText, setTone, $ } from './core/dom.js';
 import { store, actions, connectServer } from './core/store.js';
@@ -18,6 +19,7 @@ import { mountConnection } from './pages/connection.js';
 import { duration } from './core/format.js';
 import sensors from './sensors/index.js';
 import runs from './pages/runs.js';
+import results from './pages/results.js';
 import loadCellLab from './sensors/load-cell-lab.js';
 
 function sensorDef(def) {
@@ -46,6 +48,7 @@ const pages = [
   { id: DASH, title: 'Dashboard', mount: (root) => mountDashboard(root, sensors.map(sensorDef), { onOpen: (id) => go(id) }) },
   ...sensors.map((def) => ({ id: def.id, title: def.title, get def() { return sensorDef(def); }, mount: (root) => mountSensorPage(root, sensorDef(def), { onSub: (sub) => setHash(def.id, sub) }) })),
   { id: runs.id, title: runs.title, mount: (root) => runs.mount(root) },
+  { id: results.id, title: results.title, mount: (root) => results.mount(root) },
 ];
 // Older links land on the page that now holds them.
 const ALIAS = { airspeed: 'wind-speed', mcp9808: 'temperature', environment: 'temperature' };
@@ -72,7 +75,7 @@ const tabs = pages.map((p, i) => {
   return { p, el, badge };
 });
 const tablist = h('nav.tabs', { 'aria-label': 'Pages' },
-  tabs.map((t, i) => [i === tabs.length - 1 || i === 1 ? h('span.sep', { 'aria-hidden': 'true' }) : null, t.el]));
+  tabs.map((t, i) => [t.p.id === runs.id || i === 1 ? h('span.sep', { 'aria-hidden': 'true' }) : null, t.el]));
 const strip = overviewStrip(OVERVIEW, (id) => go(id));
 let selected = null;
 function markTab(id) {
@@ -183,7 +186,7 @@ function go(route) {
 }
 
 window.addEventListener('hashchange', () => go(location.hash.slice(1)));
-// 1–5: the pages in top-bar order. Not while typing, and not with a modifier (browser shortcuts keep working).
+// 1–6: the pages in top-bar order. Not while typing, and not with a modifier (browser shortcuts keep working).
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   if (e.target.closest?.('input, select, textarea, [contenteditable]')) return;

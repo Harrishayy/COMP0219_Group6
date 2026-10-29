@@ -243,3 +243,20 @@ def test_giga_adapter_runs_as_the_server_loads_it(monkeypatch):
         gen.close()
     finally:
         stop.set()
+
+
+def test_window_is_the_run_at_full_resolution(tmp_path):
+    """The Results page's slice: every board sample in [a, b] s with the tunnel held at its last reading, the error,
+    and the score of the pairs in the window."""
+    t0 = 1.7e9
+    tg = t0 + np.arange(0, 20, 0.2)
+    ts = t0 + np.arange(0, 20, 0.005)
+    tunnel.write_run(tmp_path / "w", {"t": tg, "v": 5.0 + (tg - t0 > 10), "pa": None, "device": "GIGA", "port": "p"},
+                     {"t": ts, "v": 5.2 + (ts - t0 > 10), "name": "Student", "port": "b"})
+    w = tunnel.window("w", 4.0, 6.0, dirs=[tmp_path])
+    assert len(w["t"]) == pytest.approx(400, abs=2) and 4.0 <= w["t"][0] and w["t"][-1] <= 6.0
+    assert set(w["gt"]) == {5.0} and w["error"][5] == pytest.approx(0.2)
+    assert w["stats"]["pairs"] == pytest.approx(10, abs=1) and w["stats"]["bias"] == pytest.approx(0.2)
+    r = tunnel.load("w", dirs=[tmp_path], series=False)
+    assert r["gt_name"] == "GIGA" and set(r["files"]) == {"aligned", "vdas", "student"}
+    assert {b["lo"]: round(b["t_first"]) for b in r["bands"]} == {5: 0, 6: 10}

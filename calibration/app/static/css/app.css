@@ -241,6 +241,9 @@ button.pill.rec { color: var(--bad); }
 .legend .sw.dash { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; }
 .chart { position: relative; height: 300px; }
 .chart.tall { height: 340px; }
+.chart.short { height: 180px; }
+.scrub { width: 100%; accent-color: var(--accent); margin: 0; }   /* a time slider under a timeline (Results) */
+.path { word-break: break-all; }                                  /* a file path in a table */
 .chart canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .chart .tip {
   position: absolute; top: 8px; pointer-events: none; z-index: 1; background: var(--surface); border: var(--border) solid var(--line-strong);

@@ -117,17 +117,58 @@ def analyse(t: np.ndarray, gt: np.ndarray, board: np.ndarray) -> dict:
     return out
 
 
+SESSIONS = REPO / "calibration" / "runs"   # calib/recorder.py RUNS_DIR: a dashboard recording's full session
+_cache: dict = {}
+
+
+def _arrays(base: Path) -> dict:
+    """The run's three files as arrays (epoch s), read once per change of the files: the Results page asks for
+    many windows of one run."""
+    files = {s: base.with_name(base.name + s + ".csv") for s in SUFFIXES}
+    key = (str(base), tuple(f.stat().st_mtime if f.exists() else 0.0 for f in files.values()))
+    if key not in _cache:
+        t, gt, st = _columns(files["_aligned"], "timestamp_epoch", "ground_truth_mps", "student_mps")
+        ts, vs = _columns(files["_student"], "timestamp_epoch", "value_raw_mps")
+        tg, vg = _columns(files["_vdas"], "timestamp_epoch", "value_raw_mps")
+        if not t.size and not ts.size:
+            raise FileNotFoundError(f"{base}: no _aligned.csv or _student.csv")
+        _cache.clear()
+        _cache[key] = {"t": t, "gt": gt, "st": st, "ts": ts, "vs": vs, "tg": tg, "vg": vg,
+                       "t0": float(min(a[0] for a in (t, ts, tg) if a.size))}
+    return _cache[key]
+
+
+def _session_of(name: str) -> Path | None:
+    """The dashboard session a run was saved from (Record writes <stem>.csv there and <stem>[_giga…] here)."""
+    for stem in (name, *(name[: -len(s)] for s in ("_giga", "_simulated", "_pitot") if name.endswith(s))):
+        p = SESSIONS / f"{stem}.csv"
+        if p.is_file():
+            return p
+    return None
+
+
+def _device_name(base: Path) -> str:
+    try:
+        with open(base.with_name(base.name + "_vdas.csv"), newline="", encoding="utf-8") as fh:
+            return next(csv.DictReader(fh), {}).get("device_name") or "VDAS"
+    except OSError:
+        return ""
+
+
 def load(name: str | None = None, dirs=RUN_DIRS, series: bool = True) -> dict:
     """A run's score, drift and (series=True) its traces for plotting, with t in seconds from the run's start."""
     base = find(name, dirs)
-    t, gt, st = _columns(base.with_name(base.name + "_aligned.csv"), "timestamp_epoch", "ground_truth_mps", "student_mps")
-    ts, vs = _columns(base.with_name(base.name + "_student.csv"), "timestamp_epoch", "value_raw_mps")
-    tg, vg = _columns(base.with_name(base.name + "_vdas.csv"), "timestamp_epoch", "value_raw_mps")
-    if not t.size and not ts.size:
-        raise FileNotFoundError(f"{base}: no _aligned.csv or _student.csv")
-    starts = [a[0] for a in (t, ts, tg) if a.size]
-    t0 = min(starts)
-    out = {"name": base.name, "dir": str(base.parent), "t0_epoch": float(t0), **analyse(t, gt, st)}
+    A = _arrays(base)
+    t, gt, st, ts, vs, tg, vg, t0 = (A[k] for k in ("t", "gt", "st", "ts", "vs", "tg", "vg", "t0"))
+    out = {"name": base.name, "dir": str(base.parent), "t0_epoch": t0, **analyse(t, gt, st)}
+    out["files"] = {s.lstrip("_"): str(f) for s in SUFFIXES if (f := base.with_name(base.name + s + ".csv")).is_file()}
+    session = _session_of(base.name)
+    out["session"] = str(session) if session else None
+    out["source"] = "dashboard" if session else "logger"
+    out["gt_name"] = _device_name(base)
+    for b in out.get("bands", []):   # when the ground truth first entered each band, to jump there
+        m = np.isfinite(st) & (gt >= b["lo"]) & (gt < b["lo"] + 1)
+        b["t_first"] = float(t[m][0] - t0) if m.any() else None
     if ts.size > 1 and ts[-1] > ts[0]:
         # samples over time: the logger stamps a whole serial chunk at once, so gaps between samples mean nothing
         out["board_rate_hz"] = float((ts.size - 1) / (ts[-1] - ts[0]))
@@ -138,6 +179,33 @@ def load(name: str | None = None, dirs=RUN_DIRS, series: bool = True) -> dict:
     if series:
         out["series"] = _series(t0, t, gt, st, ts, vs, tg, vg)
     return out
+
+
+def window(name: str, a: float, b: float, dirs=RUN_DIRS, max_points: int = 24000) -> dict:
+    """[a, b] s of a run at full resolution, for the Results page: the board's samples with the ground truth held
+    at its last reading (as the tunnel reports it) and their difference, on the board's times; and the score of the
+    pairs in the window (each ground-truth sample against the nearest board sample, as _aligned.csv and Score.py)."""
+    base = find(name, dirs)
+    A = _arrays(base)
+    t0 = A["t0"]
+    ts, vs = (A["ts"], A["vs"]) if A["ts"].size else (A["t"], A["st"])
+    tg, vg = (A["tg"], A["vg"]) if A["tg"].size else (A["t"], A["gt"])
+    m = (ts - t0 >= a) & (ts - t0 <= b)
+    tw, vw = ts[m], vs[m]
+    step = max(1, int(math.ceil(tw.size / max_points)))
+    tw, vw = tw[::step], vw[::step]
+    ok = np.isfinite(vg)
+    tg, vg = tg[ok], vg[ok]
+    i = np.searchsorted(tg, tw, side="right") - 1
+    held = np.where(i >= 0, vg[np.clip(i, 0, None)], np.nan) if tg.size else np.full(tw.shape, np.nan)
+    pm = (A["t"] - t0 >= a) & (A["t"] - t0 <= b) & np.isfinite(A["st"]) & np.isfinite(A["gt"])
+    e = A["st"][pm] - A["gt"][pm]
+    stats = {"pairs": int(e.size)}
+    if e.size:
+        stats.update(mse=float(np.mean(e * e)), rmse=float(np.sqrt(np.mean(e * e))), bias=float(np.mean(e)),
+                     sigma=float(np.std(e)), gt_mean=float(np.mean(A["gt"][pm])), board_mean=float(np.mean(A["st"][pm])))
+    return {"name": base.name, "a": float(a), "b": float(b), "t0_epoch": t0, "decimated": step,
+            "t": _clean(tw - t0), "board": _clean(vw), "gt": _clean(held), "error": _clean(vw - held), "stats": stats}
 
 
 def _series(t0, t, gt, st, ts, vs, tg, vg) -> dict:

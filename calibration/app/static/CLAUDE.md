@@ -14,10 +14,11 @@ change. The product brief is `PRODUCT.md` at the repo root; the server protocol 
 | The calibration page every sensor shares    | `js/core/sensor-page.js`                                |
 | The one-screen dashboard (a tile per sensor) | `js/core/dashboard.js`; what a tile shows: the module's `tile` |
 | The readings strip under the app bar        | `overviewStrip` in `js/core/dashboard.js`; which readouts: `OVERVIEW` in `js/main.js` |
-| App bar, routing, keys 1–5, record button   | `js/main.js`, `js/core/sock.js`                         |
+| App bar, routing, keys 1–6, record button   | `js/main.js`, `js/core/sock.js`                         |
 | Wind Tunnel Logger runs (Tunnel runs panel) | `runsPanel` in `js/sensors/wind-speed.js`; data from `calib/tunnel.py` |
 | Connection popover and chip                 | `js/pages/connection.js`                                |
 | Recording, export, replay, activity log     | `js/pages/runs.js`                                      |
+| Results: a saved tunnel run, any moment of it | `js/pages/results.js`; data from `calib/tunnel.py` (`load`, `window`) |
 | Talking to the server, the 200 Hz buffer    | `js/core/store.js`                                      |
 | Board banner, browser-tab icon and title    | `js/main.js`, `js/core/sock.js` (`favicon`)             |
 | A sensor's breadboard wiring diagram        | `js/wiring/parts/<sensor>.js` (data), `js/wiring/render.js` |
@@ -85,6 +86,9 @@ short class name, and add a row to the catalogue below.
 | Reference       | `.ref` `.cmd` `.brief`                  | from a module's `info`                   |
 | Notice          | `.notice`                               | part not in this build                   |
 | Table           | `.table` `.r` `.ok` `.warn` `.bad`      |                                          |
+| Chart sizes     | `.chart` `.tall` `.short`               | TimeChart `range`, `cursor`, `shade`, `onPick` for recorded runs |
+| Time slider     | `.scrub`                                | under a timeline (Results)               |
+| File path       | `.path`                                 | breaks anywhere in a table cell          |
 | Toast           | `.toast`                                | results and board errors                 |
 | Banner          | `.banner` `.bad` `.warn`                | no board, silent board, simulator, replay |
 | Sub-tabs        | `.segmented.subtabs`                    | Bench, Wiring, Datasheet; `aria-selected` |

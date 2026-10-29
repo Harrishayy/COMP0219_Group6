@@ -163,3 +163,20 @@ def test_live_reload_watcher(tmp_path):
     assert w.changes() == []
     js.unlink()
     assert [Path(f).name for f in w.changes()] == ["b.js"]
+
+
+def test_results_endpoints(tmp_path, monkeypatch):
+    """Results page: a window of a run over HTTP; Show in Finder only for files in the run folders."""
+    import numpy as np
+    from calib import tunnel
+
+    monkeypatch.setattr(tunnel, "RUN_DIRS", (tmp_path,))
+    t = 1.7e9 + np.arange(0, 10, 0.2)
+    tunnel.write_run(tmp_path / "r", {"t": t, "v": np.full(t.size, 4.0), "pa": None, "device": "GIGA", "port": "p"},
+                     {"t": t + 0.001, "v": np.full(t.size, 4.1), "name": "Student", "port": "b"})
+    with TestClient(create_app(Engine("sim", seed=1))) as client:
+        w = client.get("/api/tunnel/window", params={"name": "r", "a": 2, "b": 4}).json()
+        assert w["stats"]["pairs"] == 11 and abs(w["stats"]["bias"] - 0.1) < 1e-6
+        assert client.get("/api/tunnel/window", params={"name": "r", "a": 4, "b": 2}).status_code == 404
+        assert client.post("/api/reveal", json={"path": "/etc/hosts"}).status_code == 403
+        assert client.post("/api/reveal", json={"path": str(tmp_path / "nope.csv")}).status_code == 404

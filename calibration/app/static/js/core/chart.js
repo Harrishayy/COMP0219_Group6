@@ -41,6 +41,13 @@ class Base {
       this.onHover?.();
     });
     this.canvas.addEventListener('pointerleave', () => { this.hoverX = null; this.tip.hidden = true; this.onHover?.(); });
+    // onPick(t): a click on a TimeChart, as a time on its x axis (the Results page jumps there)
+    this.canvas.addEventListener('pointerdown', (e) => {
+      const v = this.view;
+      if (!this.onPick || !v) return;
+      const x = e.clientX - this.canvas.getBoundingClientRect().left;
+      if (x >= v.l && x <= v.r) this.onPick(v.t0 + ((x - v.l) / (v.r - v.l)) * (v.t1 - v.t0));
+    });
   }
 
   begin() {
@@ -105,16 +112,24 @@ class Base {
   }
 }
 
+const firstAtOrAfter = (t, v, lo, hi) => { while (lo < hi) { const k = (lo + hi) >> 1; if (t[k] < v) lo = k + 1; else hi = k; } return lo; };
+
 /**
  * Live traces against time. draw({ t, i0, window, lines: [{ label, color, data, width?, dash?, digits? }],
  * unit, yMin?, yMax?, zero?, xFormat?(t) }). Lines are min/max decimated per pixel so 30 k points stay cheap.
+ * A recorded run instead gives range: [t0, t1] (the x axis, any part of `t`), and optionally cursor: t (a marked
+ * time), shade: [a, b] (a highlighted span) and tipFormat(t) for the hover readout's heading.
  */
 export class TimeChart extends Base {
   draw(m) {
     const { t, lines } = m;
-    const n = t.length, i0 = Math.max(0, m.i0 ?? 0);
-    if (n - i0 < 2) return this.empty(m.emptyText || 'Waiting for data…');
-    const tEnd = t[n - 1], t0 = tEnd - m.window;
+    let n = t.length, i0 = Math.max(0, m.i0 ?? 0);
+    if (m.range) {
+      i0 = Math.max(0, firstAtOrAfter(t, m.range[0], 0, n) - 1);
+      n = Math.min(t.length, firstAtOrAfter(t, m.range[1], i0, t.length) + 1);
+    }
+    if (n - i0 < 2) { this.view = null; return this.empty(m.emptyText || 'Waiting for data…'); }
+    const tEnd = m.range ? m.range[1] : t[n - 1], t0 = m.range ? m.range[0] : tEnd - m.window;
     let lo = Infinity, hi = -Infinity;
     for (const L of lines) {
       for (let i = i0; i < n; i++) {
@@ -138,13 +153,25 @@ export class TimeChart extends Base {
     ctx.beginPath();
     ctx.rect(F.pad.l, 0, w - F.pad.l - F.pad.r, h);
     ctx.clip();
+    if (m.shade) {
+      ctx.fillStyle = cssColor('--accent-soft');
+      const xa = Math.max(F.pad.l, F.X(m.shade[0])), xb = Math.min(w - F.pad.r, F.X(m.shade[1]));
+      ctx.fillRect(xa, F.pad.t, Math.max(1, xb - xa), h - F.pad.t - F.pad.b);
+    }
     if (m.zero && lo < 0 && hi > 0) {
       ctx.strokeStyle = cssColor('--line-strong');
       ctx.beginPath(); ctx.moveTo(F.pad.l, Math.round(F.Y(0)) + 0.5); ctx.lineTo(w, Math.round(F.Y(0)) + 0.5); ctx.stroke();
     }
     for (const L of lines) this.trace(ctx, F, t, L, i0, n, w);
+    if (Number.isFinite(m.cursor) && m.cursor >= t0 && m.cursor <= tEnd) {
+      const xc = Math.round(F.X(m.cursor)) + 0.5;
+      ctx.strokeStyle = cssColor('--accent');
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(xc, F.pad.t); ctx.lineTo(xc, h - F.pad.b); ctx.stroke();
+    }
     ctx.restore();
-    this.hover(ctx, F, w, h, m, i0, n, tEnd);
+    this.view = { t0, t1: tEnd, l: F.pad.l, r: w - F.pad.r };
+    this.hover(ctx, F, w, h, m, i0, n, tEnd, t0);
   }
 
   trace(ctx, F, t, L, i0, i1, w) {
@@ -175,10 +202,10 @@ export class TimeChart extends Base {
     ctx.setLineDash([]);
   }
 
-  hover(ctx, F, w, h, m, i0, n, tEnd) {
+  hover(ctx, F, w, h, m, i0, n, tEnd, t0) {
     const x = this.hoverX;
     if (x == null || x < F.pad.l || x > w - F.pad.r) { this.tip.hidden = true; return; }
-    const t = m.t, tq = tEnd - m.window + ((x - F.pad.l) / (w - F.pad.l - F.pad.r)) * m.window;
+    const t = m.t, tq = t0 + ((x - F.pad.l) / (w - F.pad.l - F.pad.r)) * (tEnd - t0);
     let lo = i0, hi = n - 1;
     while (lo < hi) { const k = (lo + hi) >> 1; if (t[k] < tq) lo = k + 1; else hi = k; }
     const xi = F.X(t[lo]);
@@ -194,7 +221,7 @@ export class TimeChart extends Base {
     }
     this.tip.replaceChildren();
     const head = document.createElement('b');
-    head.textContent = `${(t[lo] - tEnd).toFixed(2)} s`;
+    head.textContent = m.tipFormat ? m.tipFormat(t[lo]) : `${(t[lo] - tEnd).toFixed(2)} s`;
     this.tip.append(head);
     for (const [a, b] of rows) {
       const s1 = document.createElement('span'), s2 = document.createElement('span');

@@ -572,7 +572,8 @@ const runsPanel = {
     host.hidden = false;
     runView.block = chartBlock;
     const replay = button('Replay in the calibration views', () => S.runs?.[Number(pick.value)] && replayRun(ctx, S.runs[Number(pick.value)]));
-    return h('div.stack', h('div.row', pick, replay, button('Refresh', () => list(), { cls: '.quiet' })), note, stats, chartBlock);
+    const inResults = button('Open in Results', () => { const r = S.runs?.[Number(pick.value)]; if (r) location.hash = `#results/${encodeURIComponent(r.name)}`; }, { cls: '.quiet' });
+    return h('div.stack', h('div.row', pick, replay, inResults, button('Refresh', () => list(), { cls: '.quiet' })), note, stats, chartBlock);
   },
   update() { drawRun(); },
 };

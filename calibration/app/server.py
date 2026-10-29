@@ -11,6 +11,8 @@ import math
 import os
 import shlex
 import shutil
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -1017,6 +1019,36 @@ def create_app(engine: Engine) -> FastAPI:
         except (FileNotFoundError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         return JSONResponse(r)
+
+    @app.get("/api/tunnel/window")
+    async def tunnel_window(name: str, a: float, b: float, dir: str = ""):
+        """Results page: a slice of a run at full resolution (calib/tunnel.py window)."""
+        try:
+            dirs = [d for d in tunnel.RUN_DIRS if not dir or str(d) == dir] or tunnel.RUN_DIRS
+            if not (b > a) or b - a > 600:
+                raise ValueError("ask for 0 < b - a <= 600 s")
+            r = await asyncio.get_running_loop().run_in_executor(None, lambda: tunnel.window(Path(name).name, a, b, dirs))
+            return JSONResponse(r)
+        except (FileNotFoundError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+    @app.post("/api/reveal")
+    async def reveal(body: dict):
+        """Show a run's file in Finder (Explorer, the file manager). Only files under the run folders."""
+        try:
+            p = Path(str(body.get("path", ""))).resolve(strict=True)
+        except (OSError, RuntimeError):
+            return JSONResponse({"error": "no such file"}, status_code=404)
+        roots = [Path(d).resolve() for d in (*tunnel.RUN_DIRS, recmod.RUNS_DIR) if Path(d).exists()]
+        if not any(p == r or r in p.parents for r in roots):
+            return JSONResponse({"error": "only files in the run folders"}, status_code=403)
+        cmd = (["open", "-R", str(p)] if sys.platform == "darwin" else ["explorer", f"/select,{p}"] if os.name == "nt"
+               else ["xdg-open", str(p.parent if p.is_file() else p)])
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"ok": True, "path": str(p)})
 
     @app.get("/")
     async def index():
