@@ -54,14 +54,15 @@ const ALIAS = { airspeed: 'wind-speed', mcp9808: 'temperature', environment: 'te
 const conn = mountConnection();
 const mascot = h('span', { 'aria-live': 'off' });
 const context = h('span', 'Nucleo-F411RE');
-// Record: always in the bar. It records what the dashboard sees (board, force, ρ, ground truth) into calibration/runs/.
+// Record: always in the bar. It records what the dashboard sees (board, force, ρ, ground truth) into calibration/runs/;
+// with tunnel ground truth it is also saved as a Wind Tunnel Logger run (data/tunnel/), listed in Tunnel runs.
 const recTime = h('span.t');
 const recBtn = h('button.btn.sm.rec-btn', {
   type: 'button', 'aria-pressed': 'false', title: 'Record a session (Runs lists them)',
   onclick: () => {
     const on = !store.session?.recording;
     actions.record(on);
-    toast(on ? 'Recording. Press Stop to save it in Runs.' : 'Recording saved: see Runs.');
+    if (on) toast('Recording. Press Stop to save it in Runs.');
   },
 }, h('span.dot'), h('span.l', 'Record'), recTime);
 const tabs = pages.map((p, i) => {
@@ -225,6 +226,11 @@ store.on('log', (e) => {
   if (e.msg === lastErr.msg && now - lastErr.t < 8000) return;
   lastErr = { msg: e.msg, t: now };
   toast(e.msg.replace(/^#err\s*/, 'Board: '), 'bad', 6000);
+});
+store.on('session', (m) => {
+  if (m.recording !== false) return;
+  const run = m.tunnel_run;
+  toast(run ? `Recording saved in Runs, and as tunnel run ${run.name} (Wind speed › Tunnel runs).` : 'Recording saved: see Runs.', 'ok', run ? 7000 : 4000);
 });
 store.on('hello', (m) => {
   const t = m.telemetry || {};

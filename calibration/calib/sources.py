@@ -141,6 +141,8 @@ def find_nucleo_port() -> str | None:
         if "stlink" in text or "st-link" in text or "vid:pid=0483:" in text:
             return p["device"]
     for p in list_ports():  # no USB descriptors (some Linux setups): fall back to the device name
+        if "vid:pid=" in p["hwid"].lower():
+            continue  # it has a USB id and it is not ST's: another board (a GIGA pitot tube is a usbmodem too)
         if "usbmodem" in p["device"] or "ttyACM" in p["device"]:
             return p["device"]
     return None
@@ -162,6 +164,7 @@ class SerialSensorSource(Source):
         self.parser = LineParser()
         self._ser = None
         self._tx_lock = threading.Lock()
+        self.tap = None  # called with every chunk read, as read: the relay to the Wind Tunnel Logger (calib/relay.py)
         self.lines = 0
         self.data_rows = 0
         self.last_line_t: float | None = None  # perf_counter of the last line, for "port open but silent"
@@ -289,6 +292,11 @@ class SerialSensorSource(Source):
                         if not chunk:
                             continue
                         t = time.perf_counter()
+                        if self.tap:
+                            try:
+                                self.tap(chunk)
+                            except Exception:  # the copy must never stop the dashboard's own reading
+                                pass
                         buf += chunk
                         *lines, buf = buf.split(b"\n")
                         if len(buf) > 4096:  # no newline for a long time: garbage, resync

@@ -27,12 +27,29 @@ def _add_gt_args(p):
     g.add_argument("--gt-pressure", action="store_true", help="GT prints pitot differential pressure (Pa), not m/s")
     g.add_argument("--gt-vdas", action="store_true",
                    help="the white tunnel's VDAS box over USB, read as the Wind Tunnel Logger reads it (fan off at start)")
+    g.add_argument("--gt-giga", nargs="?", const="auto", metavar="PORT",
+                   help="the wood tunnel's GIGA pitot tube over USB, driven as the Wind Tunnel Logger drives it "
+                        "(found by its Arduino USB id unless PORT is given; fan off at start)")
+    g.add_argument("--gt-p-pa", type=float, default=101325.0,
+                   help="today's pressure in Pa, sent to the GIGA as the logger sends it (default %(default)g)")
+    g.add_argument("--gt-tair-c", default="20",
+                   help="today's air temperature in °C sent to the GIGA, or off (default %(default)s)")
 
 
 def _resolve_gt(a):
-    """--gt-vdas is the module adapter calib/vdas_gt.py with --gt-pressure."""
+    """--gt-vdas and --gt-giga are the module adapters calib/vdas_gt.py and calib/giga_gt.py with --gt-pressure."""
+    if getattr(a, "gt_vdas", False) and getattr(a, "gt_giga", None):
+        raise SystemExit("pick one ground truth: --gt-vdas (white tunnel) or --gt-giga (wood tunnel)")
     if getattr(a, "gt_vdas", False):
         a.gt_module, a.gt_pressure = f"{Path(__file__).with_name('vdas_gt.py')}:read_pa", True
+    if getattr(a, "gt_giga", None):
+        import os
+
+        # the adapter runs in this process and reads its settings from the environment (calib/giga_gt.py)
+        os.environ["CALIB_GIGA_PORT"] = "" if a.gt_giga == "auto" else a.gt_giga
+        os.environ["CALIB_GIGA_P_PA"] = str(a.gt_p_pa)
+        os.environ["CALIB_GIGA_TAIR_C"] = str(a.gt_tair_c)
+        a.gt_module, a.gt_pressure = f"{Path(__file__).with_name('giga_gt.py')}:read_pa", True
 
 
 def _load_params(path: str | None) -> dict:

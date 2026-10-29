@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import shlex
 import shutil
 import threading
@@ -28,7 +29,9 @@ from calib import recorder as recmod
 from calib import tunnel
 from calib.metrics import resample
 from calib.data import Run
+from calib import relay
 from calib.recorder import Session
+from calib.relay import BoardRelay
 from calib.sources import (AUTO_PORT, PROFILES, CSVReplaySource, GroundTruthSource, SerialSensorSource, SimSource,
                            SimulatedTunnel, list_ports)
 
@@ -153,8 +156,11 @@ class Engine:
         self.env: dict = {}  # last `#env` reply, plus its arrival time `t`
         self.info: deque = deque(maxlen=500)
         self.recorder: Session | None = None
-        self._rec_seq = 0
+        self._rec_seq = self._rec_gt_seq = 0
         self._rec_dyn = models.DynState()
+        self._rec_log: dict | None = None  # raw tunnel and board samples while recording, for the logger's files
+        self.last_tunnel_run: dict | None = None  # {name, dir} the last stopped recording was also saved as
+        self.relay: BoardRelay | None = None  # the board's stream for the Wind Tunnel Logger (calib/relay.py)
         self.auto_push = False
         self.last_fit: dict | None = None
         self.sim: SimulatedTunnel | None = None
@@ -263,6 +269,7 @@ class Engine:
             out["mode"] = "live"
             if port:
                 s_ = SerialSensorSource(port, baud, on_sensor, on_info, on_cal)
+                s_.tap = self._relay_write
                 out["sensor_src"] = s_
                 out["sources"].append(s_)
                 out["labels"]["sensor"] = "auto-detect" if port == AUTO_PORT else port
@@ -294,7 +301,7 @@ class Engine:
             self._labels, self._cfg = built["labels"], built["cfg"]
             self.board_cal = {}
             self._dyn, self._rec_dyn = models.DynState(), models.DynState()
-            self._sent_seq = self._est_seq = self._rec_seq = 0
+            self._sent_seq = self._est_seq = self._rec_seq = self._rec_gt_seq = 0
             self._gt_only_sent = 0
             self._replace_pending = True
         if self.sim:  # the serial source sends GET on every (re)connect; the simulated board needs asking too
@@ -371,8 +378,11 @@ class Engine:
                 return
             if self._cfg.get("gt_pressure"):  # GT script prints pitot dynamic pressure (Pa): v = √(2·dp/ρ)
                 rho = self.sensor.cols.get("rho", [])
-                v = float(models.pitot_speed(v, rho[-1] if rho and rho[-1] > 0.5 else models.RHO_REF))
-            self.gt.append(t, {"gt": v})
+                pa = v
+                v = float(models.pitot_speed(pa, rho[-1] if rho and rho[-1] > 0.5 else models.RHO_REF))
+                self.gt.append(t, {"gt": v, "pa": pa})
+            else:
+                self.gt.append(t, {"gt": v})
 
     def _on_info(self, line: str, gen=None):
         if gen is not None and gen != self._gen:
@@ -407,6 +417,13 @@ class Engine:
 
     # ---------------------------------------------------------------------------------- lifecycle
     def start(self):
+        if self.mode == "live" and relay.available() and not self.relay:
+            try:
+                self.relay = BoardRelay()
+                print(f"Wind Tunnel Logger: the board is also on {relay.LINK} (pnpm logger, port "
+                      f"\"{relay.LABEL}\"); give the logger the tunnel's ground truth, not this dashboard")
+            except OSError as e:
+                self.info.append(f"#relay for the Wind Tunnel Logger not available: {e}")
         for s in self.sources:
             s.start()
 
@@ -415,6 +432,14 @@ class Engine:
             s.stop()
         if self.recorder:
             self.recorder.close()
+        if self.relay:
+            self.relay.close()
+            self.relay = None
+
+    def _relay_write(self, chunk: bytes):
+        r = self.relay
+        if r:
+            r.write(chunk)
 
     # ------------------------------------------------------------------------------------ params
     def _mark(self, kind: str, before: dict, detail=None):
@@ -569,6 +594,7 @@ class Engine:
             "sensor_hz": s["hz"], "gt_hz": g["hz"], "drops": drops, "bad_lines": bad,
             "rho": last("rho"), "temp_c": last("temp_c"), "pressure_pa": last("pressure_pa"),
             "port_sensor": self._sensor_label(), "port_gt": self._labels["gt"],
+            "relay": str(self.relay.link) if self.relay else None,
             "sensor_status": getattr(self.sensor_src, "status", "not configured"),
             "gt_status": getattr(self.gt_src, "status", "not configured"),
             "sensor_connected": bool(getattr(self.sensor_src, "connected", False)),
@@ -678,14 +704,25 @@ class Engine:
                     "profile": self.sim.profile if self.sim else None}
             with self.lock:
                 self._rec_seq = self.sensor.seq_end  # only data from now on
+                self._rec_gt_seq = self.gt.seq_end
             self._rec_dyn = models.DynState()
+            self._rec_log = {"epoch": time.time() - time.perf_counter(), "gt_t": [], "gt_v": [], "gt_pa": [],
+                             "st_t": [], "st_v": []}
             self.recorder = Session(self.params, meta, label=label or f"{self.mode}_drag_plate")
             return f"recording to {self.recorder.path}"
         if not on and self.recorder:
             self.record_tick()
             rec, self.recorder = self.recorder, None
             p = rec.close()
-            return f"saved {rec.rows} rows to {p} and {rec.json_path.name}"
+            msg = f"saved {rec.rows} rows to {p} and {rec.json_path.name}"
+            self.last_tunnel_run = None
+            try:
+                files = self._save_tunnel_run(rec.path.stem)
+            except OSError as e:
+                return f"{msg}; the Wind Tunnel Logger files could not be written: {e}"
+            if files:
+                self.last_tunnel_run = {"name": tunnel._base(files[0]), "dir": str(files[0].parent)}
+            return f"{msg}; as a Wind Tunnel Logger run: {', '.join(f.name for f in files)} in {files[0].parent}" if files else msg
         return "recording unchanged"
 
     def record_tick(self):
@@ -698,6 +735,14 @@ class Engine:
             start = max(self._rec_seq, self.sensor.seq0)
             ts, cols = self.sensor.arrays(start)
             tg, g = self.gt.arrays(max(self.gt.seq_end - 2000, self.gt.seq0))
+            tg_new, g_new = self.gt.arrays(max(self._rec_gt_seq, self.gt.seq0))
+            self._rec_gt_seq = self.gt.seq_end
+        log = self._rec_log
+        if log is not None and len(tg_new):
+            log["gt_t"].append(tg_new)
+            log["gt_v"].append(g_new["gt"])
+            if "pa" in g_new:
+                log["gt_pa"].append(g_new["pa"])
         if len(ts) == 0:
             return
         gt_last = tg[-1] if len(tg) else None
@@ -709,8 +754,37 @@ class Engine:
         est = self._compute_est(cols, self._rec_dyn)
         gt_on = resample(tg, g.get("gt", np.zeros(0)), ts) if len(tg) >= 2 else np.full(len(ts), np.nan)
         self._rec_seq = start + len(ts)
+        if log is not None and "v" in cols:
+            log["st_t"].append(ts)
+            log["st_v"].append(cols["v"])
         rec.add_rows(ts, gt_on, cols.get("v"), est, cols.get("feature"), cols.get("rho"), cols.get("temp_c"),
                      cols.get("pressure_pa"))
+
+    def _save_tunnel_run(self, stem: str) -> list[Path]:
+        """The recording's raw tunnel and board samples as a Wind Tunnel Logger run (calib/tunnel.py write_run): from
+        the board in data/tunnel/, from the simulator in calibration/runs/ with a "_simulated" name, as the logger
+        names its own. Nothing without ground truth, and nothing for a replay (that run is already on disk)."""
+        log, self._rec_log = self._rec_log, None
+        if not log or not log["gt_t"] or self.mode == "replay":
+            return []
+        cat = lambda k: np.concatenate(log[k]) if log[k] else None  # noqa: E731
+        adapter = str(self._cfg.get("gt_value") or "")
+        if self.sim:
+            device, port, suffix, folder = "VDAS", "SIMULATED-VDAS", "_simulated", recmod.RUNS_DIR
+        elif "giga_gt" in adapter:
+            device, port, suffix, folder = "GIGA", os.environ.get("CALIB_GIGA_PORT") or "GIGA", "_giga", tunnel.RUN_DIRS[0]
+        elif "vdas_gt" in adapter:
+            device, port, suffix, folder = "VDAS", "VDAS-HID", "", tunnel.RUN_DIRS[0]
+        else:
+            device, port, suffix, folder = "pitot", self._labels.get("gt", "-"), "_pitot", tunnel.RUN_DIRS[0]
+        pa = cat("gt_pa")
+        gt_t = cat("gt_t")
+        return tunnel.write_run(
+            Path(folder) / f"{stem}{suffix}",
+            {"t": gt_t + log["epoch"], "v": cat("gt_v"), "pa": pa if pa is not None and len(pa) == len(gt_t) else None,
+             "device": device, "port": port},
+            {"t": (cat("st_t") if log["st_t"] else np.zeros(0)) + log["epoch"],
+             "v": cat("st_v") if log["st_v"] else np.zeros(0), "name": "Student", "port": self._labels.get("sensor", "-")})
 
     def session_status(self) -> dict | None:
         rec = self.recorder
@@ -831,6 +905,7 @@ def create_app(engine: Engine) -> FastAPI:
             if was and not engine.recorder:
                 st = was.status()
                 st["recording"] = False
+                st["tunnel_run"] = engine.last_tunnel_run  # SPEC §6: also saved as a Wind Tunnel Logger run
                 await broadcast(st)
         elif t == "note":
             if engine.recorder:

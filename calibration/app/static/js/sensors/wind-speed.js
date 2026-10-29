@@ -62,7 +62,7 @@ const fanOn = (s) => tunnel(s) && Math.abs(s.buf.last('gt')) > 0.3;
 const boardParams = (s) => ({ ...s.params, ...Object.fromEntries(Object.entries(s.board).filter(([, v]) => isNum(v))) });
 const rhoNow = (s) => (s.buf.last('rho') > 0.5 ? s.buf.last('rho') : 1.2);
 const NEEDS_TUNNEL = { tone: 'skip', text: 'Needs airflow and the ground truth' };
-const tunnelNote = () => h('p.faint', 'Runs in the tunnel. Start the dashboard with the tunnel\'s ground truth (pnpm dev --gt-vdas on the white tunnel, or Connection, top right) to enable it; the bench steps do not need it.');
+const tunnelNote = () => h('p.faint', 'Runs in the tunnel. Start the dashboard with the tunnel\'s ground truth (pnpm dev --gt-vdas on the white tunnel, pnpm dev --gt-giga on the wood one, or Connection, top right) to enable it; the bench steps do not need it.');
 const boardScore = (s) => s.metrics?.dev?.mse;
 const previewScore = (s) => s.metrics?.est?.mse;
 const hasForce = (s) => isNum(s.buf.last('feature'));
@@ -523,7 +523,7 @@ function runStats(r, ctx) {
 
 const runsPanel = {
   title: 'Tunnel runs',
-  sub: 'Saved by the Wind Tunnel Logger (pnpm logger) in data/tunnel/: the board against the tunnel and the drift of its error.',
+  sub: 'Saved by the Wind Tunnel Logger (pnpm logger) or by Record with tunnel ground truth, in data/tunnel/: the board against the tunnel and the drift of its error.',
   render(ctx) {
     const pick = h('select.select', { 'aria-label': 'Tunnel run', style: { flex: '1' } });
     const stats = h('div'), note = h('p.faint'), host = h('div.chart', { hidden: true });
@@ -543,7 +543,7 @@ const runsPanel = {
       drawRun();
     }
 
-    async function list() {
+    async function list(pickName) {
       try {
         const res = await fetch('/api/tunnel/runs');
         const data = await res.json();
@@ -553,7 +553,9 @@ const runsPanel = {
         note.textContent = S.runs.length ? ''
           : 'No runs yet. Start the logger with pnpm logger (stop pnpm dev first: one program owns the board\'s port), log a run and save it; it lands in data/tunnel/.';
         pick.hidden = !S.runs.length;
-        if (S.runs.length) await open(0);
+        const i = Math.max(0, S.runs.findIndex((r) => r.name === pickName));
+        pick.value = String(i);
+        if (S.runs.length) await open(i);
       } catch {
         note.textContent = 'The calibration server is not reachable.';
       }
@@ -561,6 +563,8 @@ const runsPanel = {
 
     pick.addEventListener('change', () => open(Number(pick.value)));
     list();
+    // a recording with tunnel ground truth was just saved as a logger run: show it
+    ctx.store.on('session', (m) => { if (m.recording === false && m.tunnel_run) list(m.tunnel_run.name); });
     const key = (label, color, dash) => h('span.row', { style: { gap: 'var(--sp-1)' } },
       h(`span.sw${dash ? '.dash' : ''}`, { style: { background: `var(${color})`, color: `var(${color})` } }), label);
     const legend = h('div.legend', key('Tunnel', '--s-truth'), key('Board', '--s-sensor'), key('Board − tunnel, 10 s mean', '--s-preview', true));
@@ -568,7 +572,7 @@ const runsPanel = {
     host.hidden = false;
     runView.block = chartBlock;
     const replay = button('Replay in the calibration views', () => S.runs?.[Number(pick.value)] && replayRun(ctx, S.runs[Number(pick.value)]));
-    return h('div.stack', h('div.row', pick, replay, button('Refresh', list, { cls: '.quiet' })), note, stats, chartBlock);
+    return h('div.stack', h('div.row', pick, replay, button('Refresh', () => list(), { cls: '.quiet' })), note, stats, chartBlock);
   },
   update() { drawRun(); },
 };

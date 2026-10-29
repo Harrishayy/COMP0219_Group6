@@ -75,14 +75,34 @@ latest ρ (`rho_ref` until one arrives).
    Logger's own `vdas_afa5.py` (tools/wind-tunnel-logger). `calib/vdas_gt.py:read_pa` averages 5 s with the fan
    off (a mean beyond ±6 Pa is rejected for +3 Pa, as the logger does) and yields `|dp − offset|`; the flag
    implies `--gt-pressure`. About 5 samples/s, whole Pa.
+5. **GIGA** — `--gt-giga [PORT]`: the wood tunnel's GIGA pitot tube (Arduino GIGA R1, WindSpeedGiga) over USB
+   serial, found by its Arduino USB id unless PORT is given. `calib/giga_gt.py:read_pa` drives it as the logger's
+   `GigaSource` does: after every `#HELLO` it sends `P` (`--gt-p-pa`), `LEQ 102.177`, `C 1`, `TAIR` (`--gt-tair-c`)
+   and `RATE 100`, counts readings only once `#CFG` confirms LEQ and C, zeroes on the board once (`ZERO`, fan off;
+   a rejected zero keeps the GIGA's own and says so), gives the zero back with `ZERO SET` after a reset, and
+   yields `|dp_pa|` from rows without the HOLD, ZEROING, OVR or CLIP flags. Implies `--gt-pressure`. About 100
+   samples/s.
 
 All samples are timestamped on the PC with `time.perf_counter()` on arrival.
+
+**Relay to the Wind Tunnel Logger.** In live mode on POSIX (`BENCH_RELAY=0` turns it off) the server copies every
+chunk read from the board, unchanged, to a pseudo-terminal reached through the symlink `calibration/.board-relay`
+(`calib/relay.py`; replaced on start, removed on stop, so the logger reconnects to the same name after a restart).
+`tools/wind-tunnel-logger/run.py` adds it to the logger's port list as "Board via the dashboard". Bytes written by
+the reader are discarded; with no reader, the ~1 kB buffer is flushed instead of blocking. Telemetry `relay` is the
+link's path or null.
 
 Runs saved by the Wind Tunnel Logger itself (`<run>_aligned.csv`: `timestamp_epoch, ground_truth_mps,
 student_mps`, plus `_vdas.csv` and `_student.csv`) are read by `calib/tunnel.py` from `data/tunnel/` and
 `~/Documents/Wind Tunnel Logger/logs`, over HTTP (§6) and by `calib tunnel`. `calib.data.load_csv` also opens any
 of a run's files as a replay (`connect {source: "replay", replay_file}`): the board's samples as `v` (re-spaced
 evenly, since the logger stamps whole serial chunks) and the tunnel's as ground truth; no force column.
+
+A dashboard recording (§7) with ground truth is also saved in those three files (`tunnel.write_run`: the logger's
+columns, epoch timestamps, each ground-truth sample paired with the nearest board sample within 150 ms), as
+`<session stem>[_giga|_pitot].csv` in `data/tunnel/` from the board, or `<session stem>_simulated` in
+`calibration/runs/` from the simulator (also searched). The ground truth is the speed the dashboard used (the
+board's ρ); `pa_corrected` is the adapter's pressure when the source gives Pa. Replays are not saved again.
 
 ## 3. Model (force → airspeed), mirroring `firmware/lib/airmath`
 
@@ -202,7 +222,8 @@ Server → client JSON messages:
 - `params`: `{type, model, params}` (after any change)
 - `log`: `{type, level: "info"|"error"|"warning", msg}` (export logs also carry `paths`)
 - `session` (~1 Hz while recording, once more on stop with `recording: false`): `{type, recording, path,
-  json_path, elapsed_s, rows, psets, pset, segments: [last ≤ 12 segment summaries, see §7], events: [last ≤ 20]}`
+  json_path, elapsed_s, rows, psets, pset, segments: [last ≤ 12 segment summaries, see §7], events: [last ≤ 20]}`;
+  the stop message adds `tunnel_run: {name, dir} | null`, the Wind Tunnel Logger run it was also saved as (§2)
 - `ports`: `{type, ports: [{device, description, hwid}], sensor: {port, baud, connected}, gt: {kind, value, connected}}`
   (`ports` is empty without pyserial; for sim/replay `gt.kind` is the source name and `gt.value` its label)
 - `runs`: `{type, runs: [{name, csv, json, size_bytes, started, model, mode, rows, duration_s, psets, best_mse_pc}]}`,
@@ -274,5 +295,6 @@ Each changed name gets its own event with `from`/`to`. Segment metrics skip the 
 change so filter transients aren't blamed on the new values. `push`, `TARE` and other commands, and notes,
 are events that don't open a pset. `python -m calib session runs/run_*.json [--png out.png]` prints the
 per-pset table; `fit` and `report` read the session CSV directly. This is the only recording format:
-the dashboard, the server and `python -m calib record` (headless) all write it.
+the dashboard, the server and `python -m calib record` (headless) all write it. With ground truth, a copy in the
+Wind Tunnel Logger's format is written on stop (§2).
 

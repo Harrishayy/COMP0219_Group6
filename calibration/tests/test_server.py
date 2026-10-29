@@ -38,8 +38,16 @@ def test_websocket_smoke(tmp_path, monkeypatch):
         ws.send_json({"type": "record", "on": False})
         done = _until(ws, "session", lambda m: not m["recording"])
         assert done["psets"] >= 2 and done["rows"] > 200
+    assert done["tunnel_run"]["name"].endswith("_simulated")
     sess = recmod.load_session(next(tmp_path.glob("run_*.json")))
     assert sess["segments"][1]["changed"] == ["ema_alpha"]
+    # the same recording as a Wind Tunnel Logger run, named "_simulated" as the logger names its own
+    from calib import tunnel
+    stem = next(tmp_path.glob("run_*.json")).stem
+    for suffix in ("_vdas", "_student", "_aligned"):
+        assert (tmp_path / f"{stem}_simulated{suffix}.csv").is_file()
+    r = tunnel.load(f"{stem}_simulated", dirs=[tmp_path])
+    assert r["pairs"] > 100 and r["missing"] == 0 and r["board_rate_hz"] == pytest.approx(200, rel=0.1)
 
 
 def test_env_reaches_telemetry():

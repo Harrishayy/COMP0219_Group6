@@ -93,8 +93,24 @@ becomes `v = √(2·Δp/ρ)` with the board's live ρ.
 On the white TecQuipment tunnel, `--gt-vdas` (`pnpm dev --gt-vdas`) reads its VDAS box over USB the way the course's
 Wind Tunnel Logger does (`tools/wind-tunnel-logger`, `calib/vdas_gt.py`): it zeroes with the fan off for 5 s at
 start, then streams whole pascals about 5 times a second. Start it with the fan off, and close the logger first:
-one program drives the box. For the assessed runs, use the logger itself (`pnpm logger`) and compare them in the
-dashboard's Tunnel runs panel or with `calib tunnel`. `serve --replay data/tunnel/<run>_aligned.csv` (or Replay in
+one program drives the box.
+
+On the wood tunnel, `--gt-giga` (`pnpm dev --gt-giga`) drives its GIGA pitot tube the way the logger does
+(`calib/giga_gt.py`): it sends the tube-loss calibration (LEQ 102.177 m, C 1) after every reset, zeroes it on the
+board with the fan off, then streams about 100 readings a second. Give the day's pressure and air temperature
+with `--gt-p-pa 100870 --gt-tair-c 22.5` (as typed into the logger), and `--gt-giga /dev/cu.usbmodemXXXX` if more
+than one Arduino is plugged in.
+
+With either, Record saves the run twice: the session in `calibration/runs/` (force, ρ, settings, for fits) and
+the same samples as a Wind Tunnel Logger run in `data/tunnel/` (`_vdas`, `_student`, `_aligned` CSVs, which the
+course's Score.py reads), listed in the Tunnel runs panel. For the assessed runs, use the logger itself
+(`pnpm logger`) and compare them in the dashboard's Tunnel runs panel or with `calib tunnel`.
+
+The logger can run beside the dashboard. `serve` on the board copies every byte the board sends to a virtual serial
+port, `calibration/.board-relay` (`calib/relay.py`; `BENCH_RELAY=0` turns it off; not on Windows), which
+`pnpm logger` lists as "Board via the dashboard". Give the logger the tunnel's ground truth (start the dashboard
+without `--gt-vdas`/`--gt-giga`: one program per tunnel box). The logger then logs and saves on its own Start/Stop,
+whatever Record does, and the dashboard keeps its force, ρ and settings. `serve --replay data/tunnel/<run>_aligned.csv` (or Replay in
 the dashboard) plays a logger run through the calibration views.
 
 ## When the sensor disagrees with the pitot

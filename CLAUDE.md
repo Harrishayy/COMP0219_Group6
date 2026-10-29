@@ -10,8 +10,9 @@ calibration bench is for and its design principles are in `PRODUCT.md`.
 pnpm dev          # dashboard on the Nucleo; with none plugged in it says so and waits (creates .venv on first run)
 pnpm dev:sim      # dashboard on the simulator; every page says the readings are synthetic
 pnpm test         # calibration tests + wiring circuit check (pnpm check:wiring alone)
-pnpm logger       # the course's Wind Tunnel Logger (assessed tunnel runs), saving to data/tunnel/; stop pnpm dev first
+pnpm logger       # the course's Wind Tunnel Logger (assessed tunnel runs), saving to data/tunnel/; runs beside pnpm dev
 pnpm dev --gt-vdas   # dashboard with the white tunnel's VDAS box as live ground truth (fan off at start)
+pnpm dev --gt-giga   # the same on the wood tunnel, with its GIGA pitot tube
 cd firmware && pio run -e airspeed_drag_plate -t upload   # flash the competition build
 ```
 
@@ -118,7 +119,11 @@ plus a row in the command table in `calibration/README.md`.
 **Tunnel session.** The assessed runs come from the Wind Tunnel Logger (`pnpm logger`, ground truth *Wind tunnel*
 on the white tunnel, *GIGA pitot tube* on the wood one). It reads the last number on each line as the speed, so
 the debug row ends in `v`; keep it last. To calibrate in the tunnel with force and ρ alongside, use
-`pnpm dev --gt-vdas` instead (one program at a time on the board's port and on the VDAS box). Compare saved runs
+`pnpm dev --gt-vdas` (white) or `pnpm dev --gt-giga` (wood) instead (one program at a time on the board's port and
+on the tunnel's box). Record there also saves the run in the logger's format in `data/tunnel/`. To run both at once,
+start `pnpm dev` without a `--gt-*` flag, then `pnpm logger` with the port "Board via the dashboard" and the tunnel as
+its ground truth: the dashboard copies the board's stream to `calibration/.board-relay` (`calib/relay.py`), and each
+program records on its own (stopping one never stops the other). Compare saved runs
 on the Wind speed page's Tunnel runs panel or with `calib tunnel`; "Replay" runs a logger run through the
 calibration views (live chart, accuracy, by speed, score, diagnosis; no force was logged, so no curve fit).
 

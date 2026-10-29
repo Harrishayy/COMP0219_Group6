@@ -74,7 +74,11 @@ function findBoardPort() {
     say('no Nucleo plugged in yet: the dashboard will say so and connect when one appears (pnpm dev:sim for the simulator)');
     return 'auto';
   }
-  if (ports.length > 1) say(`several boards found (${ports.join(', ')}); using ${ports[0]}. Set BENCH_PORT to choose.`);
+  if (ports.length > 1) {
+    // a GIGA pitot tube is a usbmodem too: let the server pick the Nucleo by its ST-LINK USB id
+    say(`several boards found (${ports.join(', ')}); using the one with ST-LINK's USB id. Set BENCH_PORT to choose.`);
+    return 'auto';
+  }
   return ports[0];
 }
 
@@ -145,6 +149,6 @@ else if (cmd === 'test') {
 } else if (cmd === 'logger') {
   ensurePython();
   ensureRequirements(join(LOGGER, 'requirements.txt'), join(VENV, '.logger-requirements'), 'Wind Tunnel Logger requirements');
-  say('runs are saved in data/tunnel/. The logger needs the board\'s port: stop pnpm dev first.');
+  say('runs are saved in data/tunnel/. With pnpm dev running, pick the port "Board via the dashboard" (and give the logger the tunnel\'s ground truth); otherwise the board itself.');
   run(PY, [join(LOGGER, 'run.py'), ...extra], { cwd: ROOT });
 } else fail(`unknown command ${cmd}: use dev, board, sim, test or logger`);

@@ -4,18 +4,21 @@ ground truth, overlaid and scored, with the drift of the error over the run.
 A run is <name>_aligned.csv (each ground-truth sample paired with the nearest board sample within 150 ms; the file
 the module's Score.py reads), <name>_vdas.csv (every ground-truth sample) and <name>_student.csv (every board sample,
 200 Hz). The logger in this repo saves them in data/tunnel/; a copy installed with pip saves them in
-~/Documents/Wind Tunnel Logger/logs, which is searched too.
+~/Documents/Wind Tunnel Logger/logs, which is searched too. A dashboard recording with tunnel ground truth saves the
+same three files (`write_run`): in data/tunnel/ from the board, in calibration/runs/ from the simulator.
 """
 from __future__ import annotations
 
 import csv
 import math
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
-RUN_DIRS = (REPO / "data" / "tunnel", Path.home() / "Documents" / "Wind Tunnel Logger" / "logs")
+RUN_DIRS = (REPO / "data" / "tunnel", Path.home() / "Documents" / "Wind Tunnel Logger" / "logs",
+            REPO / "calibration" / "runs")   # dashboard recordings on the simulator
 SUFFIXES = ("_aligned", "_vdas", "_student")
 DRIFT_WINDOW_S = 10.0      # the error's moving mean, to show drift under the ground truth's 1 Pa steps
 PLOT_POINTS = 4000         # most points per series sent to the dashboard
@@ -197,6 +200,76 @@ def as_run(path):
     t0 = min(a[0] for a in (ts, tg) if a.size)
     ok = np.isfinite(vg)
     return Run(ts - t0, {"v": vs}, tg[ok] - t0, vg[ok], {"source": str(base), "format": "wind_tunnel_logger"})
+
+
+# The logger's file formats (its LOG_HEADER, align() and write_logs()), so a dashboard recording saves a run that
+# this module, the logger's "Plot run" and the course's Score.py read like one the logger saved itself
+LOG_HEADER = ["timestamp_iso", "timestamp_epoch", "t_rel_s", "device_name", "port", "value_raw_mps",
+              "value_clipped_mps", "expected_error_pct", "cov_lower_mps", "cov_upper_mps", "pa_raw", "pa_corrected"]
+ALIGNED_HEADER = ["timestamp_iso", "timestamp_epoch", "ground_truth_mps", "student_mps"]
+ALIGN_TOL_S = 0.150         # logger config logging.align_tolerance_ms
+CLIP_MPS = (-2.0, 100.0)    # ui.min_speed, ui.max_speed
+
+
+def _iso(t: float) -> str:
+    return datetime.fromtimestamp(t).astimezone().isoformat(timespec="milliseconds")
+
+
+def align(tg, vg, ts, vs, tol_s: float = ALIGN_TOL_S) -> np.ndarray:
+    """Each ground-truth sample's nearest board sample within tol_s (NaN where none is that close), as the logger
+    pairs them for _aligned.csv."""
+    tg, ts, vs = (np.asarray(a, dtype=float) for a in (tg, ts, vs))
+    out = np.full(tg.shape, np.nan)
+    if not ts.size:
+        return out
+    i = np.searchsorted(ts, tg)
+    lo, hi = np.clip(i - 1, 0, ts.size - 1), np.clip(i, 0, ts.size - 1)
+    j = np.where(np.abs(ts[lo] - tg) <= np.abs(ts[hi] - tg), lo, hi)
+    near = np.abs(ts[j] - tg) <= tol_s
+    out[near] = vs[j[near]]
+    return out
+
+
+def write_run(base: Path, gt: dict, board: dict) -> list[Path]:
+    """Write <base>_vdas.csv, <base>_student.csv and <base>_aligned.csv the way the logger does.
+
+    gt: {"t": epoch s, "v": m/s, "pa": Pa after the zero or None, "device": "VDAS" | "GIGA" | …, "port": str};
+    board: {"t": epoch s, "v": m/s, "name": str, "port": str}. Rows with a non-finite speed are left out."""
+    base = Path(base)
+    base.parent.mkdir(parents=True, exist_ok=True)
+    tg, vg = np.asarray(gt["t"], dtype=float), np.asarray(gt["v"], dtype=float)
+    pa = np.asarray(gt["pa"], dtype=float) if gt.get("pa") is not None else np.full(tg.shape, np.nan)
+    ts, vs = np.asarray(board["t"], dtype=float), np.asarray(board["v"], dtype=float)
+    keep_g, keep_s = np.isfinite(vg), np.isfinite(vs)
+    tg, vg, pa, ts, vs = tg[keep_g], vg[keep_g], pa[keep_g], ts[keep_s], vs[keep_s]
+    t0 = min([a[0] for a in (tg, ts) if a.size], default=0.0)
+    files = []
+
+    def rows(t, v, name, port, pas):
+        for ti, vi, p in zip(t, v, pas):
+            yield [_iso(ti), f"{ti:.6f}", f"{ti - t0:.6f}", name, port, f"{vi:.6f}",
+                   f"{min(max(vi, CLIP_MPS[0]), CLIP_MPS[1]):.6f}", "", "", "",
+                   "", "" if not math.isfinite(p) else f"{p:.4f}"]
+
+    for suffix, data in (("_vdas", rows(tg, vg, gt["device"], gt["port"], pa)),
+                         ("_student", rows(ts, vs, board["name"], board["port"], np.full(ts.shape, np.nan)))):
+        if (tg if suffix == "_vdas" else ts).size:
+            f = base.with_name(base.name + suffix + ".csv")
+            with open(f, "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(LOG_HEADER)
+                w.writerows(data)
+            files.append(f)
+    if tg.size:
+        paired = align(tg, vg, ts, vs)
+        f = base.with_name(base.name + "_aligned.csv")
+        with open(f, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(ALIGNED_HEADER)
+            for ti, g, s in zip(tg, vg, paired):
+                w.writerow([_iso(ti), f"{ti:.6f}", f"{g:.6f}", "" if not math.isfinite(s) else f"{s:.6f}"])
+        files.append(f)
+    return files
 
 
 def _device(base: Path) -> str:
