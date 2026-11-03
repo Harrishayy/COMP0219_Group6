@@ -497,6 +497,36 @@ def cmd_tunnel(a):
     print("\n".join(tunnel.summary_lines(r)))
 
 
+def cmd_tunnel_fit(a):
+    """Fit a calibration profile to dashboard recordings with noisy tunnel ground truth (calib/tunnel_fit.py)."""
+    from . import tunnel_fit
+    from .recorder import runs_dir
+
+    if a.list:
+        for p in [tunnel_fit.default_profile(), *tunnel_fit.list_profiles()]:
+            mse = f"MSE {p['mse']:.3f}" if p.get("mse") is not None else ""
+            print(f"{p['name']:28s} {mse:10s} {p['label']}")
+        return
+    if not a.runs:
+        sys.exit("give the recordings to fit (calibration/runs/run_*.csv), or --list")
+    paths = []
+    for r in a.runs:
+        p = Path(r)
+        if not p.exists() and (runs_dir() / p.name).with_suffix(".csv").exists():
+            p = (runs_dir() / p.name).with_suffix(".csv")
+        paths.append(p)
+    try:
+        rec = tunnel_fit.calibrate(paths, zero=a.zero, gt_cutoff_hz=a.gt_cutoff, dyn_cutoff_hz=a.filter_cutoff)
+    except (FileNotFoundError, ValueError) as e:
+        sys.exit(str(e))
+    rec["name"] = a.name
+    print("\n".join(tunnel_fit.summary_lines(rec)))
+    if a.dry_run:
+        return
+    for k, v in tunnel_fit.write_profile(rec, a.name, a.label or "").items():
+        print(f"{k:7s} {v}")
+
+
 def cmd_serve(a):
     from app.server import Engine, serve
 
@@ -601,6 +631,18 @@ def main(argv=None):
     p.add_argument("run", nargs="?", help="run name or any of its CSV files (default: the newest run)")
     p.add_argument("--list", action="store_true", help="list the saved runs")
     p.set_defaults(fn=cmd_tunnel)
+
+    p = sub.add_parser("tunnel-fit", help="fit a switchable calibration profile to recordings with noisy ground truth")
+    p.add_argument("runs", nargs="*", help="dashboard recordings with force and ground truth (calibration/runs/run_*.csv)")
+    p.add_argument("--name", default="tunnel", help="profile name: calibration/profiles/<name>.json")
+    p.add_argument("--label", help="one line shown in the dashboard's calibration picker")
+    p.add_argument("--zero", choices=("fit", "tare"), default="fit",
+                   help="fit: F0 is the runs' mean zero (matches that day's ground truth); tare: F0 = 0, trust TARE")
+    p.add_argument("--gt-cutoff", type=float, default=0.5, help="ground-truth low-pass for the curve fit, Hz")
+    p.add_argument("--filter-cutoff", type=float, default=5.0, help="ground-truth low-pass for the filter search, Hz")
+    p.add_argument("--dry-run", action="store_true", help="print the fit, write nothing")
+    p.add_argument("--list", action="store_true", help="list the saved profiles")
+    p.set_defaults(fn=cmd_tunnel_fit)
 
     a = ap.parse_args(argv)
     a.fn(a)

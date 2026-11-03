@@ -3,9 +3,17 @@
 // Defaults live here. Fitted values go in calibration_generated.h (same macro names),
 // which overrides these when present. Every CAL_<NAME> is also a live parameter:
 // "SET <name> <value>" over serial changes it in RAM, "GET" prints them all.
+//
+// A build can instead boot with a saved calibration profile (profiles/<name>/calibration_profile.h,
+// written by `python -m calib tunnel-fit`). Its env defines CAL_PROFILE and puts that folder on the
+// include path, and the profile then replaces calibration_generated.h. See the
+// airspeed_drag_plate_<profile> envs in platformio.ini. The file name is fixed, not a macro, so the
+// build notices when a refit changes the profile.
 #pragma once
 
-#if __has_include("calibration_generated.h")
+#if defined(CAL_PROFILE)
+#include "calibration_profile.h"
+#elif __has_include("calibration_generated.h")
 #include "calibration_generated.h"
 #endif
 

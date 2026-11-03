@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from calib import export, fit, metrics, models
 from calib import recorder as recmod
-from calib import tunnel
+from calib import tunnel, tunnel_fit
 from calib.metrics import resample
 from calib.data import Run
 from calib import relay
@@ -1019,6 +1019,12 @@ def create_app(engine: Engine) -> FastAPI:
         except (FileNotFoundError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         return JSONResponse(r)
+
+    @app.get("/api/calibrations")
+    async def calibrations():
+        """Calibration profiles to switch the board between (calib/tunnel_fit.py): the defaults, then each saved one."""
+        return JSONResponse({"profiles": [tunnel_fit.default_profile(), *tunnel_fit.list_profiles()],
+                             "dir": str(tunnel_fit.PROFILE_DIR)})
 
     @app.get("/api/tunnel/window")
     async def tunnel_window(name: str, a: float, b: float, dir: str = ""):

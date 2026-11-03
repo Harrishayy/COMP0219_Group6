@@ -195,6 +195,16 @@ The header export target is `firmware/include/calibration_generated.h` (it overr
 `firmware/include/calibration.h` defaults); the toolkit writes a copy to `calibration/exports/` and only
 writes into `firmware/include/` when `--install` is passed.
 
+**Calibration profiles** (`calib tunnel-fit`, `calib/tunnel_fit.py`) are named calibrations kept beside the default
+one, to switch between: `calibration/profiles/<name>.json` is the same record with `name`, `label`, and `params`
+limited to `sqrt_k, sqrt_x0, lc_n_per_count, filter_kind, ema_alpha, lpf_hz, lead_tau`. The fit details are in
+`fit` (`static`, `dynamics`, `gt_cleaning`, `sources`), and there is a `metrics_holdout` per run. Its `.cmd` file
+holds only those `SET` lines, so a switch never touches the tare or the thermometers. Its header,
+`firmware/include/profiles/<name>/calibration_profile.h`, is built by an env with `-DCAL_PROFILE -I include/profiles/<name>`
+(`calibration.h` then includes it instead of `calibration_generated.h`). `GET /api/calibrations` lists
+`{profiles: [{name, label, params, mse?, zero?, still_air_mps?}], dir}`, with the defaults first. The Wind speed page
+applies one with `set_params` and `push_params`.
+
 ## 6. Live app websocket protocol (`ws://localhost:8765/ws`)
 
 Read-only HTTP, for Wind Tunnel Logger runs (§2): `GET /api/tunnel/runs` → `{runs: [{name, dir, files, mtime}],

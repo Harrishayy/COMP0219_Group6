@@ -26,6 +26,7 @@ jobs:
         run: |
           pio run -d firmware \
             -e airspeed -e airspeed_cup_hall -e airspeed_drag_plate \
+            -e airspeed_drag_plate_giga_20261029 -e airspeed_drag_plate_giga_20261029_tared \
             -e env_monitor -e i2c_scan -e loadcell_test -e bridge_probe -e encoder_test -e hall_test
 
   host:

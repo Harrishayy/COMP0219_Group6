@@ -39,6 +39,7 @@ Step progress kept in a sensor module resets on a reload. Firmware still needs `
 | `calibration/calib/` | Toolkit package | `sources.py` serial, pitot and simulator streams; `models.py` the firmware chain mirrored in numpy and every parameter's spec; `fit.py` curve and response fits; `metrics.py` scores and diagnosis; `recorder.py` sessions; `export.py` JSON, C header, SET script; `cli.py` commands |
 | `calibration/app/server.py` | Dashboard server | FastAPI + one websocket. Owns the serial port, runs the PC preview, fits, diagnosis, recording; serves `app/static/` |
 | `calibration/app/static/` | Dashboard UI | Plain ES modules, no build. A one-screen dashboard (a tile per sensor), a calibration page per sensor (`js/sensors/`: temperature, load cell, wind speed) under a strip of every reading, Runs, Results (any saved tunnel run, any moment of it, with its files). Keys 1–6 switch; Record is always in the bar. Its own guide: `calibration/app/static/CLAUDE.md` |
+| `calibration/calib/tunnel_fit.py`, `calibration/profiles/` | Calibration profiles | Fitted to recordings with noisy ground truth; switchable from the Wind speed page or by env |
 | `calibration/calib/tunnel.py` | Wind Tunnel Logger runs | Reads `data/tunnel/*_aligned.csv`, scores the board against the tunnel, measures drift; `calib tunnel`, `/api/tunnel/*` |
 | `tools/wind-tunnel-logger/` | The TA's Wind Tunnel Logger v1.0.1, unmodified | Live board vs tunnel plot and the CSVs that are assessed. `run.py` redirects its logs to `data/tunnel/` and lists the dashboard's board relay as a port. Do not edit the package |
 | `calibration/tests/` | Toolkit tests | Chain mirror vs a literal port of the C++, fits, parser, sessions, websocket smoke tests |
@@ -114,6 +115,13 @@ plus a row in the command table in `calibration/README.md`.
 - Mount a bar cell by its end block only, on a spacer, arrow pointing down, force on the free end. Clamping the
   middle (gauge) section or resting the bar on the table gives no reading.
 - `bridge_probe` checks a bridge without a meter (NAU7802 channel survey, A0/A1 as a voltmeter).
+
+**Calibrate from noisy tunnel runs and switch calibrations.** `python -m calib tunnel-fit <recordings…> --name <n>`
+(dashboard recordings in `calibration/runs/`, which hold force and ρ) cleans the ground truth and fits a profile:
+`calibration/profiles/<n>.{json,cmd}` and `firmware/include/profiles/<n>/calibration_profile.h`. Switch a running board on the Wind speed
+page (Settings › Calibration › Use on board), or flash `pio run -e airspeed_drag_plate_<n> -t upload` (add the env
+to `platformio.ini` and `ci.yml`, copying the `giga_20261029` ones). Flash `airspeed_drag_plate`, or pick Default, to go back.
+`--zero fit` bakes in that day's zero offset; `--zero tare` trusts a fan-off TARE.
 
 **Tunnel session.** The assessed runs come from the Wind Tunnel Logger (`pnpm logger`, ground truth *Wind tunnel*
 on the white tunnel, *GIGA pitot tube* on the wood one). It reads the last number on each line as the speed, so

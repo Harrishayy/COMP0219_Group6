@@ -1,0 +1,185 @@
+{
+ "model": "sqrt",
+ "method": "METHOD_DRAG_PLATE",
+ "params": {
+  "sqrt_k": 247.23636120889464,
+  "sqrt_x0": 0.0,
+  "lc_n_per_count": 1e-05,
+  "filter_kind": 0.0,
+  "ema_alpha": 0.2,
+  "lpf_hz": 5.0,
+  "lead_tau": 0.0
+ },
+ "fit": {
+  "static": {
+   "sqrt_k": 247.23636120889464,
+   "sqrt_x0": 0.0,
+   "zero": "tare",
+   "k_range": [
+    243.451352337953,
+    251.08021671188624
+   ],
+   "x0_runs": {
+    "run_20261029_122515_live_drag_plate": -0.02256542710742472,
+    "run_20261029_123519_live_drag_plate": 0.010797905900564245
+   },
+   "x0_runs_pa": {
+    "run_20261029_122515_live_drag_plate": -2.7894970435821205,
+    "run_20261029_123519_live_drag_plate": 1.334817481765778
+   },
+   "still_air_mps": 0.0,
+   "q_range_pa": [
+    10.92408755730675,
+    22.606178698128666
+   ],
+   "cutoff_hz": 0.5
+  },
+  "dynamics": {
+   "params": {
+    "lead_tau": 0.0,
+    "filter_kind": 0.0,
+    "lpf_hz": 5.0
+   },
+   "mse": 0.3056401950158897,
+   "best_mse": 0.3033589775143058,
+   "cutoff_hz": 5.0
+  },
+  "dynamics_top": [
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.025,
+    "filter_kind": 0.0,
+    "lpf_hz": 2.0,
+    "mse": 0.3033589775143058
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.15,
+    "filter_kind": 0.0,
+    "lpf_hz": 1.0,
+    "mse": 0.3034338566906858
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.05,
+    "filter_kind": 0.0,
+    "lpf_hz": 1.5,
+    "mse": 0.3034585240526728
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.0,
+    "filter_kind": 0.0,
+    "lpf_hz": 3.0,
+    "mse": 0.3035850710674459
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.2,
+    "filter_kind": 0.0,
+    "lpf_hz": 1.0,
+    "mse": 0.30360315003072735
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.2,
+    "filter_kind": 0.0,
+    "lpf_hz": 0.75,
+    "mse": 0.3036662227028365
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.025,
+    "filter_kind": 0.0,
+    "lpf_hz": 1.5,
+    "mse": 0.3037884406885308
+   },
+   {
+    "sqrt_k": 247.23636120889464,
+    "sqrt_x0": 0.0,
+    "lead_tau": 0.0,
+    "filter_kind": 0.0,
+    "lpf_hz": 2.0,
+    "mse": 0.3037951689812474
+   }
+  ],
+  "gt_cleaning": {
+   "pressure_domain": true,
+   "spike_window_s": 0.25,
+   "spike_sigma": 4.0,
+   "static_cutoff_hz": 0.5,
+   "filter_search_cutoff_hz": 5.0,
+   "zero_phase": true,
+   "spikes_replaced": {
+    "run_20261029_122515_live_drag_plate": 45,
+    "run_20261029_123519_live_drag_plate": 38
+   },
+   "noise_floor_mse": {
+    "run_20261029_122515_live_drag_plate": 0.11859949594425986,
+    "run_20261029_123519_live_drag_plate": 0.11293628584038982
+   }
+  },
+  "sources": [
+   "calibration/runs/run_20261029_122515_live_drag_plate.csv",
+   "calibration/runs/run_20261029_123519_live_drag_plate.csv"
+  ]
+ },
+ "metrics_before": {
+  "run_20261029_122515_live_drag_plate": {
+   "mse": 0.6198034946058526,
+   "bias": -0.5640691953551781,
+   "sigma": 0.5492080092799217,
+   "mse_clean": 0.5387857272197009,
+   "bias_clean": -0.572617757819097
+  },
+  "run_20261029_123519_live_drag_plate": {
+   "mse": 0.24146686796922318,
+   "bias": 0.12973539978750506,
+   "sigma": 0.47395737573245905,
+   "mse_clean": 0.15196536129015317,
+   "bias_clean": 0.12152137084127698
+  }
+ },
+ "metrics_after": {
+  "run_20261029_122515_live_drag_plate": {
+   "mse": 0.543689759441826,
+   "bias": -0.5190560649888879,
+   "sigma": 0.5237084693224632,
+   "mse_clean": 0.4637827465440795,
+   "bias_clean": -0.5276046274528068
+  },
+  "run_20261029_123519_live_drag_plate": {
+   "mse": 0.2391344445585643,
+   "bias": 0.1809831582121541,
+   "sigma": 0.4542901506769861,
+   "mse_clean": 0.1474976434876999,
+   "bias_clean": 0.17276912926592608
+  }
+ },
+ "metrics_holdout": {
+  "run_20261029_122515_live_drag_plate": {
+   "mse": 0.8010699121014224,
+   "bias": -0.7425541563241767,
+   "sigma": 0.499683136624714,
+   "mse_clean": 0.724939603704014,
+   "bias_clean": -0.7511027187880955
+  },
+  "run_20261029_123519_live_drag_plate": {
+   "mse": 0.601989841587454,
+   "bias": 0.6005587649172225,
+   "sigma": 0.49124231441169053,
+   "mse_clean": 0.5034060419824916,
+   "bias_clean": 0.5923447359709946
+  }
+ },
+ "created": "2026-11-03T20:54:51Z",
+ "name": "giga_20261029_tared",
+ "label": "Wood tunnel 29 Oct: Cd\u00b7A fitted through zero, F\u2080 from TARE"
+}
