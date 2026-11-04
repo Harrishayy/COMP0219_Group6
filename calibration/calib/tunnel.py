@@ -155,8 +155,10 @@ def _device_name(base: Path) -> str:
         return ""
 
 
-def load(name: str | None = None, dirs=RUN_DIRS, series: bool = True) -> dict:
-    """A run's score, drift and (series=True) its traces for plotting, with t in seconds from the run's start."""
+def load(name: str | None = None, dirs=RUN_DIRS, series: bool = True, cal: str | None = "default") -> dict:
+    """A run's score, drift and (series=True) its traces for plotting, with t in seconds from the run's start.
+    cal: also replay the run through that calibration where a recording has the force (calib/recal.py): every
+    calibration's score in out["recal"], and that one's trace in out["series"]["cal"]. None: skip."""
     base = find(name, dirs)
     A = _arrays(base)
     t, gt, st, ts, vs, tg, vg, t0 = (A[k] for k in ("t", "gt", "st", "ts", "vs", "tg", "vg", "t0"))
@@ -178,10 +180,45 @@ def load(name: str | None = None, dirs=RUN_DIRS, series: bool = True) -> dict:
         out["gt_device"] = _device(base)
     if series:
         out["series"] = _series(t0, t, gt, st, ts, vs, tg, vg)
+    if cal:
+        out["recal"] = _recal(A, cal, out.get("series"))
     return out
 
 
-def window(name: str, a: float, b: float, dirs=RUN_DIRS, max_points: int = 24000) -> dict:
+def _recal(A: dict, cal: str, series: dict | None) -> dict:
+    """What the Results page shows about other calibrations for this run (calib/recal.py)."""
+    from . import recal, tunnel_fit
+
+    profiles = tunnel_fit.all_profiles()
+    shorts = {p["name"]: p.get("short", p["name"]) for p in profiles}
+    rep = recal.replay(A, profiles)
+    if rep is None:
+        return {"available": False, "why": "No dashboard recording with the force covers this run, so it cannot be "
+                "replayed through another calibration. Press Record in the dashboard during logger runs."}
+    sc = recal.score(rep, A["tg"] if A["tg"].size else A["t"], A["vg"] if A["tg"].size else A["gt"])
+    cal = cal if cal in rep["outputs"] else "default"
+    out = {"available": True, "cal": cal, "session": rep["session"], "offset_s": rep["offset_s"],
+           "align_rms_mps": rep["align_rms_mps"], "covered_s": sc["covered_s"], "flown": rep["flown"],
+           "zero": ({**rep["zero"], "t_a": rep["zero"]["t_a"] - A["t0"], "t_b": rep["zero"]["t_b"] - A["t0"]}
+                    if rep["zero"] else None),
+           "options": [{"name": n, "label": "As flown (the board's own output)" if n == "as_flown" else rep["labels"][n],
+                        "short": "As flown" if n == "as_flown" else shorts.get(n, n),
+                        **{k: v for k, v in a.items() if k != "bands"}, "bands": a.get("bands", [])}
+                       for n, a in sc["scores"].items()]}
+    if series is not None:
+        grid = np.asarray([np.nan if x is None else x for x in series["t"]], dtype=float)
+        step = grid[1] - grid[0] if grid.size > 1 else 1.0
+        tt, v = rep["t"] - A["t0"], rep["outputs"][cal]
+        k = np.clip(np.round(tt / step).astype(int), 0, grid.size - 1)
+        inside = (tt >= -step) & (tt <= grid[-1] + step) & np.isfinite(v)
+        n = np.bincount(k[inside], minlength=grid.size)
+        tot = np.bincount(k[inside], weights=v[inside], minlength=grid.size)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            series["cal"] = _clean(np.where(n > 0, tot / n, np.nan))
+    return out
+
+
+def window(name: str, a: float, b: float, dirs=RUN_DIRS, max_points: int = 24000, cal: str | None = None) -> dict:
     """[a, b] s of a run at full resolution, for the Results page: the board's samples with the ground truth held
     at its last reading (as the tunnel reports it) and their difference, on the board's times; and the score of the
     pairs in the window (each ground-truth sample against the nearest board sample, as _aligned.csv and Score.py)."""
@@ -204,8 +241,23 @@ def window(name: str, a: float, b: float, dirs=RUN_DIRS, max_points: int = 24000
     if e.size:
         stats.update(mse=float(np.mean(e * e)), rmse=float(np.sqrt(np.mean(e * e))), bias=float(np.mean(e)),
                      sigma=float(np.std(e)), gt_mean=float(np.mean(A["gt"][pm])), board_mean=float(np.mean(A["st"][pm])))
-    return {"name": base.name, "a": float(a), "b": float(b), "t0_epoch": t0, "decimated": step,
-            "t": _clean(tw - t0), "board": _clean(vw), "gt": _clean(held), "error": _clean(vw - held), "stats": stats}
+    out = {"name": base.name, "a": float(a), "b": float(b), "t0_epoch": t0, "decimated": step,
+           "t": _clean(tw - t0), "board": _clean(vw), "gt": _clean(held), "error": _clean(vw - held), "stats": stats}
+    if cal:
+        from . import recal, tunnel_fit
+
+        rep = recal.replay(A, tunnel_fit.all_profiles())
+        if rep is not None and cal in rep["outputs"]:
+            # the calibrated output on the board's sample times, where the recording covers them
+            vc = np.interp(tw, rep["t"], rep["outputs"][cal], left=np.nan, right=np.nan)
+            out["cal"] = _clean(vc)
+            out["cal_error"] = _clean(vc - held)
+            pv = np.interp(A["t"][pm], rep["t"], rep["outputs"][cal], left=np.nan, right=np.nan)
+            ec = pv - A["gt"][pm]
+            ec = ec[np.isfinite(ec)]
+            if ec.size:
+                out["stats_cal"] = {"pairs": int(ec.size), "mse": float(np.mean(ec * ec)), "bias": float(np.mean(ec))}
+    return out
 
 
 def _series(t0, t, gt, st, ts, vs, tg, vg) -> dict:

@@ -1,9 +1,12 @@
 // Results: re-read a saved tunnel run (the Wind Tunnel Logger's own, or the copy Record saves) on one screen, built
 // like the dashboard (core/dashboard.js): on a laptop it fills the viewport and the page never scrolls (body.fit),
-// below that the tiles stack. The run bar on top: the run, its score and a verdict. Left: the timeline of the whole
-// run and the moment picked on it at full resolution. Right: what to do about it, the error per speed, the files.
+// below that the tiles stack. The run bar on top: the run, its score and a verdict (hover it for every check). Left:
+// the timeline of the whole run and the moment picked on it at full resolution. Right: the calibrations replayed on
+// the run, the error per speed, the files.
 // Data from calib/tunnel.py over HTTP: /api/tunnel/runs, /api/tunnel/run (whole run, ≤ 4000 points),
 // /api/tunnel/window (a slice, every sample) and /api/reveal (Show in Finder). #results/<run name> opens a run.
+// Calibrations: where a dashboard recording with the force covers the run, the server replays it through each
+// calibration (calib/recal.py): the Calibrations tile scores them all, and the chosen one is drawn in green.
 import { h, fill, setText, setTone } from '../core/dom.js';
 import { fixed, signed, isNum } from '../core/format.js';
 import { TimeChart } from '../core/chart.js';
@@ -18,7 +21,11 @@ const nan = (a) => Float64Array.from(a || [], (v) => (v == null ? NaN : v));
 const enc = encodeURIComponent;
 const fileName = (p) => String(p).split('/').pop();
 
-const S = { runs: [], run: null, cursor: 0, span: 10, win: null, seq: 0, want: null };
+const S = { runs: [], run: null, cursor: 0, span: 10, win: null, seq: 0, want: null, cal: 'default' };
+try { S.cal = localStorage.getItem('calib.results.cal') || 'default'; } catch { /* storage blocked */ }
+const recal = () => (S.run?.recal?.available ? S.run.recal : null);
+const calOpt = (name = recal()?.cal) => recal()?.options.find((o) => o.name === name);
+const calShort = () => (calOpt()?.label || 'Calibrated').replace(/\s*\(default\)$/, '');
 const dur = () => (S.run?.series ? S.run.series.t.at(-1) ?? 0 : 0);
 const gtName = () => (S.run?.gt_name === 'GIGA' ? 'GIGA' : 'Tunnel');
 
@@ -104,7 +111,7 @@ export default {
     const pick = h('select.select', { 'aria-label': 'Run' });
     const pill = h('span.pill', h('span.dot'), h('span'));
     const whole = { mse: cell('Score MSE', 'm²/s²'), rmse: cell('RMSE', 'm/s'), bias: cell('Bias', 'm/s'), sigma: cell('σ', 'm/s'),
-      speed: cell('Speeds', 'm/s'), len: cell('Length', 's'), rate: cell('Rates', 'Hz') };
+      cal: cell('Calibrated MSE', 'm²/s²'), speed: cell('Speeds', 'm/s'), len: cell('Length', 's'), rate: cell('Rates', 'Hz') };
     const bar = h('section.tile.results-bar', { 'aria-label': 'Run' },
       h('header.tile-head', h('h2', 'Results'), pick, pill, h('span.spacer'),
         button('Refresh', () => list(S.run?.name), { cls: '.quiet.sm' })),
@@ -117,10 +124,10 @@ export default {
     const goto = h('input.input', { placeholder: '25 or 12:38:30', 'aria-label': 'Go to time (seconds or clock time)', title: 'Seconds from the start, or a clock time', style: { width: '7.5rem' } });
     const spanSeg = h('div.segmented', { role: 'group', 'aria-label': 'Window' },
       SPANS.map((s) => h('button', { type: 'button', 'aria-pressed': String(s === S.span), onclick: () => setSpan(s) }, `${s} s`)));
-    const gtKey = h('span');
+    const gtKey = h('span'), calKey = h('span');
     const timeline = h('section.tile', { 'aria-label': 'Timeline' },
       tileHead('Timeline', h('span.faint', 'click to go there'), h('span.spacer'),
-        h('div.legend', gtKey, key('Sensor', '--s-sensor'), key('Error, 10 s mean', '--s-preview', true))),
+        h('div.legend', gtKey, key('Sensor as flown', '--s-sensor'), calKey, key('Error, 10 s mean', '--s-preview', true))),
       h('div.tile-chart', overHost),
       h('footer.tile-foot.results-controls', scrub,
         button('◀', () => setCursor(S.cursor - S.span / 2), { cls: '.sm', title: 'Back half a window (←, Shift for a whole one)' }),
@@ -129,7 +136,7 @@ export default {
         button('Largest error', () => worst(), { cls: '.quiet.sm', title: 'Where the 10 s mean error is largest' })));
 
     // ------------------------------------------------------------ the moment
-    const at = { gt: cell('Tunnel', 'm/s'), board: cell('Sensor', 'm/s'), err: cell('Error', 'm/s'),
+    const at = { gt: cell('Tunnel', 'm/s'), board: cell('Sensor', 'm/s'), err: cell('Error', 'm/s'), cal: cell('Calibrated', 'm/s'),
       wmse: cell('Window MSE', 'm²/s²'), wbias: cell('Window bias', 'm/s') };
     const atTitle = h('h2', 'At –'), atSub = h('span.faint');
     const speedHost = h('div.chart'), errHost = h('div.chart');
@@ -141,11 +148,17 @@ export default {
       h('div.tile-chart', h('div.tile-chart-head', h('span.label', 'Error: sensor − tunnel')), errHost));
 
     // ------------------------------------------------------------ right: verdicts, by speed, files
-    const checks = h('ul.checks');
+    const calPick = h('select.select', { 'aria-label': 'Calibration drawn in green', title: 'Drawn in green on the charts', style: { width: 'auto', minWidth: '0', flex: '0 1 auto' } });
+    const calBox = h('div.results-scroll');
+    calPick.addEventListener('change', () => {
+      S.cal = calPick.value;
+      try { localStorage.setItem('calib.results.cal', S.cal); } catch { /* storage blocked */ }
+      if (S.run) open(S.runs[Number(pick.value)], true);
+    });
     const bands = h('div.results-scroll');
     const files = h('div.results-files');
     const side = h('div.results-col.side',
-      h('section.tile.grow.todo', { 'aria-label': 'What to do' }, tileHead('What to do'), h('div.results-scroll', checks)),
+      h('section.tile.grow.cals', { 'aria-label': 'Calibrations' }, tileHead('Calibrations', h('span.spacer'), calPick), calBox),
       h('section.tile.grow', { 'aria-label': 'By speed' }, tileHead('By speed', h('span.faint', 'error per 1 m/s band')), bands),
       h('section.tile.files', { 'aria-label': 'Files' }, tileHead('Files', h('span.spacer'),
         button('Open folder', () => S.run && reveal(S.run.dir), { cls: '.quiet.sm' })), files));
@@ -180,7 +193,7 @@ export default {
       fill(pick, S.runs.map((r, i) => h('option', { value: String(i) }, `${r.name} · ${when(r)}`)));
       if (!S.runs.length) {
         setVerdict(null, 'No saved runs');
-        return fill(checks, h('li.all-clear', 'Log a run with the Wind Tunnel Logger (pnpm logger), or press Record with the GIGA connected.'));
+        return fill(calBox, h('p.empty', 'Log a run with the Wind Tunnel Logger (pnpm logger), or press Record with the GIGA connected.'));
       }
       let saved = null;
       try { saved = localStorage.getItem('calib.results.run'); } catch { /* storage blocked */ }
@@ -189,10 +202,10 @@ export default {
       await open(S.runs[i]);
     }
 
-    async function open(r) {
+    async function open(r, keepCursor = false) {
       if (!r) return;
       setVerdict(null, 'Loading…');
-      const res = await fetch(`/api/tunnel/run?name=${enc(r.name)}&dir=${enc(r.dir)}`);
+      const res = await fetch(`/api/tunnel/run?name=${enc(r.name)}&dir=${enc(r.dir)}&cal=${enc(S.cal)}`);
       const data = await res.json();
       if (!res.ok) return setVerdict('bad', data.error || 'Could not read the run');
       S.run = data;
@@ -200,7 +213,7 @@ export default {
       try { localStorage.setItem('calib.results.run', r.name); } catch { /* storage blocked */ }
       renderRun();
       scrub.max = String(dur());
-      setCursor(Math.min(dur(), S.span / 2));
+      setCursor(keepCursor ? S.cursor : Math.min(dur(), S.span / 2));
     }
 
     function setVerdict(tone, text) {
@@ -224,6 +237,7 @@ export default {
       setTone(whole.bias.el, Math.abs(r.bias) > 0.5 ? 'bad' : Math.abs(r.bias) > 0.2 ? 'warn' : 'ok', ['ok', 'warn', 'bad']);
       setText(whole.sigma.v, fixed(r.sigma, 3));
       setText(whole.sigma.n, 'scatter about the bias');
+      renderCal();
       const gtv = (r.series?.gt || []).filter(isNum);
       setText(whole.speed.v, gtv.length ? `${fixed(Math.min(...gtv), 1)}–${fixed(Math.max(...gtv), 1)}` : '–');
       setText(whole.speed.n, `${gtName()} range`);
@@ -233,9 +247,7 @@ export default {
       setText(whole.rate.n, `sensor / ${gtName()}`);
       setTone(whole.rate.el, isNum(r.board_rate_hz) && r.board_rate_hz < RATE_MIN ? 'bad' : null, ['ok', 'warn', 'bad']);
 
-      fill(checks, items.length
-        ? items.map((c) => h(`li.check-item.${c.level}`, h('div.head', h('span.tag', LEVEL_TAG[c.level]), h('span.title', c.title)), h('div.detail', c.detail)))
-        : h('li.all-clear', h('span.dot.ok'), 'No offset, drift or noise above the checks.'));
+      pill.title = items.map((c) => `${LEVEL_TAG[c.level]}: ${c.title}. ${c.detail}`).join('\n') || 'No offset, drift or noise above the checks.';
 
       fill(bands, r.bands?.length
         ? h('table.table', h('thead', h('tr', ['m/s', 'Pairs', 'Bias', 'σ', ''].map((c, i) => h(`th${i ? '.r' : ''}`, c)))),
@@ -255,6 +267,36 @@ export default {
       fill(files, h('p.mono.faint.results-dir', { title: r.dir }, `…/${r.dir.split('/').slice(-2).join('/')}/`),
         h('ul.results-file-list', rows.map(([what, p]) => h('li', { title: p },
           h('span.label', what), h('span.mono.path', fileName(p)), button('Show', () => reveal(p), { cls: '.quiet.sm', title: `Show ${p} in Finder` })))));
+    }
+
+    function renderCal() {
+      const rc = recal(), o = calOpt();
+      calKey.replaceChildren(rc ? key(calShort(), '--s-4') : '');
+      at.cal.el.hidden = !rc;
+      setText(whole.cal.v, o ? fixed(o.mse, 3) : '–');
+      setText(whole.cal.n, o ? calShort() : 'no force recorded');
+      setTone(whole.cal.el, o ? (o.mse < 0.2 ? 'ok' : o.mse < 1 ? 'warn' : 'bad') : null, ['ok', 'warn', 'bad']);
+      if (!rc) {
+        fill(calPick, h('option', 'None'));
+        calPick.disabled = true;
+        return fill(calBox, h('p.empty', S.run?.recal?.why || 'No replay for this run.'));
+      }
+      calPick.disabled = false;
+      fill(calPick, rc.options.filter((x) => x.name !== 'as_flown').map((x) => h('option', { value: x.name, selected: x.name === rc.cal, title: x.label }, x.short || x.label)));
+      const z = rc.zero;
+      const num = (x, d = 3) => (isNum(x) ? fixed(x, d) : '–');
+      fill(calBox,
+        h('table.table.cal-table', h('thead', h('tr', ['Calibration', 'MSE', 'Bias', 'Still'].map((c, i) => h(`th${i ? '.r' : ''}`, c)))),
+          h('tbody', rc.options.map((x) => {
+            const tone = x.mse < 0.2 ? 'ok' : x.mse < 1 ? 'warn' : 'bad';
+            const tip = `${x.label}: σ ${num(x.sigma, 2)} m/s, MSE below 2 m/s ${num(x.mse_below_2, 2)}`;
+            return h(`tr${x.name === rc.cal ? '.cur' : ''}`, { title: tip },
+              h('td', x.name === rc.cal ? h('strong', x.short || x.label) : x.short || x.label), h(`td.r.${tone}`, num(x.mse)),
+              h('td.r', isNum(x.bias) ? signed(x.bias, 2) : '–'), h('td.r', isNum(x.still_air_mps) ? fixed(x.still_air_mps, 2) : '–'));
+          }))),
+        h('p.faint.results-note', `Replayed from ${fileName(rc.session)} (force and ρ at 200 Hz), aligned to this run by the board speed (rms ${fixed(rc.align_rms_mps, 2)} m/s), scored on its ${fixed(rc.covered_s, 0)} s. `
+          + (z ? `Re-zeroed as a fan-off TARE at ${fixed(z.t_a, 0)}–${fixed(z.t_b, 0)} s (${signed(z.grams, 2)} g on the board's tare).` : 'No still air in the recording: the board\'s own tare is kept.')
+          + ' Scored against the tunnel as the logger pairs them; Still is the reading in m/s in that still air. Hover a row for σ and the MSE below 2 m/s.'));
     }
 
     // ------------------------------------------------------------ moving
@@ -295,11 +337,12 @@ export default {
     async function fetchWindow(a, b) {
       const seq = ++S.seq, r = S.run;
       try {
-        const res = await fetch(`/api/tunnel/window?name=${enc(r.name)}&dir=${enc(r.dir)}&a=${a.toFixed(3)}&b=${b.toFixed(3)}`);
+        const res = await fetch(`/api/tunnel/window?name=${enc(r.name)}&dir=${enc(r.dir)}&a=${a.toFixed(3)}&b=${b.toFixed(3)}${recal() ? `&cal=${enc(recal().cal)}` : ''}`);
         const data = await res.json();
         if (seq !== S.seq || r !== S.run) return;   // a newer request or another run since
         if (!res.ok) throw new Error(data.error);
-        S.win = { ...data, tt: nan(data.t), board: nan(data.board), gt: nan(data.gt), error: nan(data.error) };
+        S.win = { ...data, tt: nan(data.t), board: nan(data.board), gt: nan(data.gt), error: nan(data.error),
+          cal: data.cal ? nan(data.cal) : null, calError: data.cal_error ? nan(data.cal_error) : null };
         drawAll();
       } catch (e) {
         if (seq === S.seq) toast(`Could not read that part of the run: ${e.message}`, 'bad');
@@ -315,7 +358,8 @@ export default {
         xFormat: (v) => `${Math.round(v)} s`, tipFormat: tip,
         lines: [
           { label: gtName(), color: '--s-truth', data: nan(sr.gt), width: 1.5 },
-          { label: 'Sensor', color: '--s-sensor', data: nan(sr.board), width: 1.25 },
+          { label: 'Sensor as flown', color: '--s-sensor', data: nan(sr.board), width: 1.25 },
+          ...(sr.cal ? [{ label: calShort(), color: '--s-4', data: nan(sr.cal), width: 1.25 }] : []),
           { label: 'Error, 10 s mean', color: '--s-preview', data: nan(sr.error_mean), dash: true, width: 1.75 },
         ] });
       const w = S.win;
@@ -328,10 +372,12 @@ export default {
       speedChart.draw({ t: w.tt, range: [w.a, w.b], unit: 'm/s', cursor: S.cursor, xFormat: xf, tipFormat: tip, emptyText: 'No samples here',
         lines: [
           { label: gtName(), color: '--s-truth', data: w.gt, width: 2 },
-          { label: 'Sensor', color: '--s-sensor', data: w.board, width: 1.5 },
+          { label: 'Sensor as flown', color: '--s-sensor', data: w.board, width: 1.5 },
+          ...(w.cal ? [{ label: calShort(), color: '--s-4', data: w.cal, width: 1.5 }] : []),
         ] });
       errChart.draw({ t: w.tt, range: [w.a, w.b], unit: 'm/s', zero: true, cursor: S.cursor, xFormat: xf, tipFormat: tip, minSpan: 0.4,
-        emptyText: 'No samples here', lines: [{ label: 'Error', color: '--s-preview', data: w.error, width: 1.5 }] });
+        emptyText: 'No samples here', lines: [{ label: 'Error as flown', color: '--s-preview', data: w.error, width: 1.5 },
+          ...(w.calError ? [{ label: `Error, ${calShort()}`, color: '--s-4', data: w.calError, width: 1.5 }] : [])] });
 
       // the samples nearest the cursor, and the score of the pairs in the window
       let lo = 0, hi = w.tt.length - 1;
@@ -339,6 +385,8 @@ export default {
       const e = w.error[lo];
       setText(at.gt.v, fixed(w.gt[lo], 2));
       setText(at.board.v, fixed(w.board[lo], 2));
+      setText(at.cal.v, w.cal ? fixed(w.cal[lo], 2) : '–');
+      setText(at.cal.n, w.cal && isNum(w.calError?.[lo]) ? `error ${signed(w.calError[lo], 2)}` : '');
       setText(at.err.v, signed(e, 2));
       setTone(at.err.el, !isNum(e) ? null : Math.abs(e) > 0.5 ? 'bad' : Math.abs(e) > 0.2 ? 'warn' : 'ok', ['ok', 'warn', 'bad']);
       setText(at.err.n, isNum(e) && isNum(w.gt[lo]) && w.gt[lo] > 0.5 ? `${signed((100 * e) / w.gt[lo], 1)} % of the tunnel` : '');
@@ -347,6 +395,7 @@ export default {
       setText(at.wmse.n, `${st.pairs ?? 0} pairs in view`);
       setText(at.wbias.v, signed(st.bias, 3));
       setText(at.wbias.n, isNum(st.sigma) ? `σ ${fixed(st.sigma, 2)} · tunnel ${fixed(st.gt_mean, 2)}` : '');
+      if (w.stats_cal) setText(at.wmse.n, `${st.pairs ?? 0} pairs · calibrated ${fixed(w.stats_cal.mse, 3)}`);
     }
 
     list();

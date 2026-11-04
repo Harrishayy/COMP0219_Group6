@@ -40,7 +40,7 @@ chart; the full detail belongs on the sensor's page. Below that size the tiles s
 
 **Results fits one screen too.** At 1100 × 800 and up, `#results` fills the viewport (`body.fit-results`, no
 readings strip): the run bar on top (verdict pill, score readouts), the timeline and the chosen moment on the left,
-What to do, By speed and Files on the right. It uses the same tile components; its layout rules are the
+Calibrations (the run replayed through each calibration), By speed and Files on the right. Hover the verdict pill for every check. It uses the same tile components; its layout rules are the
 `.results-*` classes in `css/app.css`. Below that size it stacks and scrolls.
 
 **Remove a sensor.** Delete its line in `js/sensors/index.js` (and any `OVERVIEW` entry for it).
@@ -94,7 +94,7 @@ short class name, and add a row to the catalogue below.
 | Chart sizes     | `.chart` `.tall` `.short`               | TimeChart `range`, `cursor`, `shade`, `onPick` for recorded runs |
 | Time slider     | `.scrub`                                | under a timeline (Results)               |
 | File path       | `.path`                                 | breaks anywhere in a table cell          |
-| Results layout  | `.results` `.results-bar` `.results-body` `.results-col` `.results-moment` `.results-controls` `.results-scroll` `.results-files` | one screen with `body.fit-results` |
+| Results layout  | `.results` `.results-bar` `.results-body` `.results-col` `.results-moment` `.results-controls` `.results-scroll` `.results-files` `.results-note` | one screen with `body.fit-results`; table row `.cur` = the calibration drawn |
 | Toast           | `.toast`                                | results and board errors                 |
 | Banner          | `.banner` `.bad` `.warn`                | no board, silent board, simulator, replay |
 | Sub-tabs        | `.segmented.subtabs`                    | Bench, Wiring, Datasheet; `aria-selected` |

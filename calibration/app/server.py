@@ -1011,11 +1011,11 @@ def create_app(engine: Engine) -> FastAPI:
         return JSONResponse({"runs": tunnel.list_runs(), "dirs": [str(d) for d in tunnel.RUN_DIRS]})
 
     @app.get("/api/tunnel/run")
-    async def tunnel_run(name: str = "", dir: str = "", series: int = 1):
+    async def tunnel_run(name: str = "", dir: str = "", series: int = 1, cal: str = "default"):
         try:
             # only the logger's own folders: never an arbitrary path from the page
             dirs = [d for d in tunnel.RUN_DIRS if not dir or str(d) == dir] or tunnel.RUN_DIRS
-            r = await asyncio.get_running_loop().run_in_executor(None, lambda: tunnel.load(Path(name).name or None, dirs, series=bool(series)))
+            r = await asyncio.get_running_loop().run_in_executor(None, lambda: tunnel.load(Path(name).name or None, dirs, series=bool(series), cal=cal or None))
         except (FileNotFoundError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         return JSONResponse(r)
@@ -1027,13 +1027,13 @@ def create_app(engine: Engine) -> FastAPI:
                              "dir": str(tunnel_fit.PROFILE_DIR)})
 
     @app.get("/api/tunnel/window")
-    async def tunnel_window(name: str, a: float, b: float, dir: str = ""):
+    async def tunnel_window(name: str, a: float, b: float, dir: str = "", cal: str = ""):
         """Results page: a slice of a run at full resolution (calib/tunnel.py window)."""
         try:
             dirs = [d for d in tunnel.RUN_DIRS if not dir or str(d) == dir] or tunnel.RUN_DIRS
             if not (b > a) or b - a > 600:
                 raise ValueError("ask for 0 < b - a <= 600 s")
-            r = await asyncio.get_running_loop().run_in_executor(None, lambda: tunnel.window(Path(name).name, a, b, dirs))
+            r = await asyncio.get_running_loop().run_in_executor(None, lambda: tunnel.window(Path(name).name, a, b, dirs, cal=cal or None))
             return JSONResponse(r)
         except (FileNotFoundError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=404)

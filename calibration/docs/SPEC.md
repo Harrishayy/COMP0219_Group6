@@ -210,13 +210,18 @@ response row sets `filter_kind` 0 and `lpf_hz` on the board directly (`SET`).
 ## 6. Live app websocket protocol (`ws://localhost:8765/ws`)
 
 Read-only HTTP, for Wind Tunnel Logger runs (§2): `GET /api/tunnel/runs` → `{runs: [{name, dir, files, mtime}],
-dirs}`, newest first; `GET /api/tunnel/run?name=&dir=&series=0|1` → `calib.tunnel.load()` (`series=0` leaves out the traces): `{name, pairs, missing, mse, rmse,
+dirs}`, newest first; `GET /api/tunnel/run?name=&dir=&series=0|1&cal=<profile>` → `calib.tunnel.load()` (`series=0` leaves out the traces): `{name, pairs, missing, mse, rmse,
 bias, sigma, drift_per_min, bias_first, bias_last, k_scale?, bands: [{lo, n, bias, sigma, t_first}], board_rate_hz,
 gt_rate_hz, files: {aligned, vdas, student}, session (the dashboard session it was saved from, or null), source
-("dashboard" | "logger"), gt_name, series: {t, board, gt, error_mean, window_s}}` (404 `{error}` when missing). `dir`
-must be one of the listed folders. For the Results page, `GET /api/tunnel/window?name=&dir=&a=&b=` (0 < b − a ≤ 600 s)
+("dashboard" | "logger"), gt_name, series: {t, board, gt, error_mean, window_s, cal?}, recal}` (404 `{error}` when missing).
+`recal` (`calib/recal.py`) replays the run through every calibration from the dashboard recording that covers it:
+`{available, why?, cal, session, offset_s, align_rms_mps, covered_s, flown, zero: {force_n, grams, t_a, t_b} | null,
+options: [{name, label, short, mse, rmse, bias, sigma, mse_below_2, still_air_mps, bands}]}` ("as_flown" first), and
+`series.cal` is the chosen calibration's trace. `dir`
+must be one of the listed folders. For the Results page, `GET /api/tunnel/window?name=&dir=&a=&b=&cal=` (0 < b − a ≤ 600 s)
 → `calib.tunnel.window()`: every board sample in [a, b] s from the run's start, with the ground truth held at its last
-reading and the error, `{t, board, gt, error, decimated, stats: {pairs, mse, rmse, bias, sigma, gt_mean, board_mean}}`
+reading and the error, `{t, board, gt, error, decimated, stats: {pairs, mse, rmse, bias, sigma, gt_mean, board_mean},
+cal?, cal_error?, stats_cal?}` (`&cal=<profile>` adds the calibrated output on the board's times)
 (the stats from the scored pairs in the window). `POST /api/reveal {path}` shows a file in Finder (Explorer, the file
 manager); only files under the run folders (403 otherwise).
 
