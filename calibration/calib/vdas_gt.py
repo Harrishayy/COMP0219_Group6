@@ -42,9 +42,23 @@ def zero_offset(samples: list[float]) -> tuple[float, str]:
     return mean, f"offset {mean:+.2f} Pa"
 
 
+def _open_reader():
+    """The logger's reader, with its one "not found (open failed)" error split in two: macOS opens HID devices
+    exclusively, so a box that is plugged in but will not open is held by another program, usually the logger."""
+    mod = _vdas_module()
+    try:
+        return mod.GroundTruthReader(cell=CELL)
+    except RuntimeError:
+        if mod.hid.enumerate(mod.VENDOR_ID, mod.PRODUCT_ID):
+            raise RuntimeError("VDAS box is plugged in but busy: another program has it open (the Wind Tunnel "
+                               "Logger or TecQuipment's VDAS software). Close it, or start the dashboard with "
+                               "--no-gt and let the logger keep the box") from None
+        raise RuntimeError("VDAS box not plugged in (no TecQuipment VDAS on USB)") from None
+
+
 def read_pa(reader=None):
     if reader is None:
-        reader = _vdas_module().GroundTruthReader(cell=CELL)   # raises RuntimeError when the box is not plugged in
+        reader = _open_reader()
     q: queue.Queue = queue.Queue()
     reader.add_listener(lambda r: r["valid"] and q.put((r["t"], float(r["pa"]), r["cell"])))
     try:

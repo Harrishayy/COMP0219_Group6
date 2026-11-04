@@ -21,7 +21,15 @@ export function chipState() {
   if (t.board_state === 'absent') return { tone: 'bad', text: 'No board' };
   if (!t.sensor_connected) return { tone: 'bad', text: 'Board disconnected' };
   if (t.board_state === 'silent' || t.board_state === 'no_data') return { tone: 'bad', text: 'Board silent' };
-  return { tone: t.sensor_hz > 190 ? 'ok' : 'warn', text: `Board · ${fixed(t.sensor_hz, 0)} Hz${store.hasPitot ? '' : ' · bench'}` };
+  const board = `Board · ${fixed(t.sensor_hz, 0)} Hz`;
+  if (gtMissing()) return { tone: 'warn', text: `${board} · no tunnel` };
+  return { tone: t.sensor_hz > 190 ? 'ok' : 'warn', text: `${board}${store.hasPitot ? '' : ' · bench'}` };
+}
+
+// A ground truth was configured (VDAS box, GIGA, a script) but is not reading: say so instead of "bench".
+function gtMissing() {
+  const t = store.tele;
+  return !!t.port_gt && t.port_gt !== '-' && !t.gt_connected && !store.hasPitot;
 }
 
 export function mountConnection() {
@@ -124,9 +132,10 @@ export function mountConnection() {
       const c = chipState(), t = store.tele;
       const up = store.conn === 'open';
       setTone(dotBoard, up ? c.tone : 'idle');
-      setTone(dotPitot, up && store.hasPitot ? 'ok' : 'idle');
+      setTone(dotPitot, !up ? 'idle' : store.hasPitot ? 'ok' : gtMissing() ? 'bad' : 'idle');
       setTone(dotEnv, up && store.env && store.env.age_s < 5 ? 'ok' : 'idle');
       setText(chipText, c.text);
+      chip.title = up && gtMissing() ? `Tunnel: ${t.gt_status || 'not reading'}` : 'Board · pitot · environment';
       setText(st.server, store.conn === 'open' ? `Connected · ${store.mode || ''}` : store.conn === 'connecting' ? 'Connecting…' : 'Not running: python -m calib serve');
       setText(st.board, store.conn !== 'open' ? '–' : `${t.sensor_status || '–'}${t.sensor_hz ? ` · ${fixed(t.sensor_hz, 0)} Hz` : ''}`);
       setText(st.pitot, store.conn !== 'open' ? '–' : `${t.gt_status || '–'}${t.gt_hz ? ` · ${fixed(t.gt_hz, 0)} Hz` : ''}`);
