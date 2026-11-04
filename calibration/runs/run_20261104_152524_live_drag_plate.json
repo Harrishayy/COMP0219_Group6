@@ -1,0 +1,84 @@
+{
+ "meta": {
+  "started": "2026-11-04T15:25:24+00:00",
+  "stopped": "2026-11-04T15:27:51+00:00",
+  "fs": 200.0,
+  "warmup_s": 0.5,
+  "label": "live_drag_plate",
+  "csv": "run_20261104_152524_live_drag_plate.csv",
+  "t0": 714174.262858041,
+  "mode": "live",
+  "method": "drag_plate",
+  "port_sensor": "/dev/cu.usbmodem3103",
+  "port_gt": "/Users/harrishayyanar/Documents/sensors/calibration/calib/vdas_gt.py:read_pa",
+  "profile": null,
+  "model": "sqrt",
+  "rows": 29437
+ },
+ "param_sets": [
+  {
+   "pset": 0,
+   "t_start": 714174.262858041,
+   "t_end": 714321.448970875,
+   "params": {
+    "sqrt_k": 242.5,
+    "sqrt_x0": 0.0,
+    "lc_offset": -465642.0,
+    "lc_n_per_count": 1e-05,
+    "filter_kind": 1.0,
+    "ema_alpha": 0.2,
+    "lpf_hz": 10.0,
+    "lead_tau": 0.0,
+    "rho_ref": 1.204,
+    "temp_source": 0.0,
+    "mcp9808_offset": 0.0,
+    "sht40_offset": 0.0,
+    "stts22h_offset": 0.0,
+    "lps22df_offset": 0.0,
+    "tmp36_offset": 0.0,
+    "lm35_offset": 0.0,
+    "pressure_ref_pa": 101325.0
+   }
+  }
+ ],
+ "events": [
+  {
+   "t": 714174.262858041,
+   "rel_s": 0.0,
+   "kind": "start",
+   "name": null,
+   "from": null,
+   "to": null,
+   "detail": null
+  },
+  {
+   "t": 714321.448970875,
+   "rel_s": 147.18611283402424,
+   "kind": "stop",
+   "name": null,
+   "from": null,
+   "to": null,
+   "detail": null
+  }
+ ],
+ "segments": [
+  {
+   "pset": 0,
+   "t_start": 714174.262858041,
+   "t_end": 714321.448970875,
+   "duration_s": 147.18611283402424,
+   "n": 29437,
+   "n_scored": 29337,
+   "changed": [],
+   "metrics_pc": {
+    "n": 0
+   },
+   "metrics_board": {
+    "n": 0
+   }
+  }
+ ],
+ "summary": {
+  "segments": 1
+ }
+}
