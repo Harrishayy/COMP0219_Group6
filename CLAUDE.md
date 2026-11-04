@@ -7,11 +7,11 @@ calibration bench is for and its design principles are in `PRODUCT.md`.
 ## Run it
 
 ```bash
-pnpm dev          # dashboard on the Nucleo, GIGA pitot tube as ground truth; each waits until plugged in (creates .venv)
+pnpm dev          # dashboard on the Nucleo, white tunnel's VDAS box as ground truth (fan off at start); each waits until plugged in (creates .venv)
 pnpm dev:sim      # dashboard on the simulator; every page says the readings are synthetic
 pnpm test         # calibration tests + wiring circuit check (pnpm check:wiring alone)
 pnpm logger       # the course's Wind Tunnel Logger (assessed tunnel runs), saving to data/tunnel/; runs beside pnpm dev
-pnpm dev --gt-vdas   # the white tunnel's VDAS box as ground truth instead (fan off at start); --no-gt for none
+pnpm dev --gt-giga   # the wood tunnel's GIGA pitot tube as ground truth instead; --no-gt for none
 cd firmware && pio run -e airspeed_drag_plate -t upload   # flash the competition build
 ```
 
@@ -126,12 +126,13 @@ to `platformio.ini` and `ci.yml`, copying the `giga_20261029` ones). Flash `airs
 **Tunnel session.** The assessed runs come from the Wind Tunnel Logger (`pnpm logger`, ground truth *Wind tunnel*
 on the white tunnel, *GIGA pitot tube* on the wood one). It reads the last number on each line as the speed, so
 the debug row ends in `v`; keep it last. To calibrate in the tunnel with force and ρ alongside, use
-`pnpm dev` (GIGA pitot tube, the default) or `pnpm dev --gt-vdas` (white tunnel) instead. Record there also saves the
-run in the logger's format in `data/tunnel/`. Both run at once: with `pnpm dev` up, `pnpm logger` gets the board as
+`pnpm dev` (white tunnel's VDAS box, the default) or `pnpm dev --gt-giga` (wood tunnel) instead. Record there also saves the
+run in the logger's format in `data/tunnel/`. Both run at once: with `pnpm dev --gt-giga` up, `pnpm logger` gets the board as
 "Board via the dashboard" (`calibration/.board-relay`) and picks the GIGA through the dashboard as its ground truth by
 itself (`calibration/.giga-relay`, both ways: the logger's settings and zero reach the GIGA and win over ours); each
 program records on its own, and stopping one never stops the other (`calib/relay.py`, `calib/giga_gt.py`). The VDAS
-box cannot be shared: with `--gt-vdas` the logger has no tunnel ground truth. Compare saved runs
+box cannot be shared: with `pnpm dev` (VDAS) the logger has no tunnel ground truth, so for an assessed white-tunnel
+run close the dashboard or start it with `--no-gt`. Compare saved runs
 on the Wind speed page's Tunnel runs panel or with `calib tunnel`; "Replay" runs a logger run through the
 calibration views (live chart, accuracy, by speed, score, diagnosis; no force was logged, so no curve fit).
 

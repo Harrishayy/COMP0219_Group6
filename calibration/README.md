@@ -91,12 +91,12 @@ Point the toolkit at the lab's pitot script in whichever form we are given (in S
 Add `--gt-pressure` if the script prints the pitot's differential pressure in Pa rather than m/s: each sample
 becomes `v = √(2·Δp/ρ)` with the board's live ρ.
 
-On the white TecQuipment tunnel, `--gt-vdas` (`pnpm dev --gt-vdas`) reads its VDAS box over USB the way the course's
+On the white TecQuipment tunnel, `--gt-vdas` (what `pnpm dev` uses unless given another `--gt-*` or `--no-gt`) reads its VDAS box over USB the way the course's
 Wind Tunnel Logger does (`tools/wind-tunnel-logger`, `calib/vdas_gt.py`): it zeroes with the fan off for 5 s at
 start, then streams whole pascals about 5 times a second. Start it with the fan off, and close the logger first:
 one program drives the box.
 
-On the wood tunnel, `--gt-giga` (what `pnpm dev` uses unless given another `--gt-*` or `--no-gt`) drives its GIGA
+On the wood tunnel, `--gt-giga` (`pnpm dev --gt-giga`) drives its GIGA
 pitot tube the way the logger does
 (`calib/giga_gt.py`): it sends the tube-loss calibration (LEQ 102.177 m, C 1) after every reset, zeroes it on the
 board with the fan off, then streams about 100 readings a second. Give the day's pressure and air temperature
