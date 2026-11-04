@@ -1,9 +1,11 @@
 // Connection: the app-bar chip (dots for board · pitot · environment, then the source in words) and its
-// popover to switch between the board and the simulator, pick the pitot source and send raw board commands.
+// popover to switch between the board and the simulator, pick the pitot source, switch the board's calibration and
+// output response, and send raw board commands.
 import { h, fill, setText, setTone } from '../core/dom.js';
 import { fixed } from '../core/format.js';
 import { store, actions } from '../core/store.js';
 import { button } from '../core/ui.js';
+import { calibrationField, responseField } from '../core/calibration-controls.js';
 
 const GT_KINDS = [
   ['cmd', 'Lab script (command)', 'python3 gt.py'],
@@ -99,11 +101,17 @@ export function mountConnection() {
   const sendCmd = () => { if (cmd.value.trim()) { actions.command(cmd.value.trim()); cmd.value = ''; } };
   cmd.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendCmd(); });
 
+  // ---- the board's calibration and output response (core/calibration-controls.js)
+  const cal = calibrationField(store, actions), resp = responseField(store, actions);
+
   const pop = h('div.popover', { id: 'connection', popover: 'auto', role: 'dialog', 'aria-label': 'Connection' },
     h('h2', 'Connection'), status, h('hr'),
     h('div.row', h('span.label', 'Source'), seg), boardForm, simForm, h('hr'),
+    cal.el, resp.el, h('hr'),
     h('div.field', h('label', 'Send a board command'), h('div.row', cmd, button('Send', sendCmd))));
   document.body.append(pop);
+  cal.load();
+  pop.addEventListener('toggle', (e) => { if (e.newState === 'open') cal.load(); });   // pick up new profiles
 
   store.on('ports', (m) => {
     const cur = m.sensor?.port || port.value;
@@ -140,6 +148,8 @@ export function mountConnection() {
       setText(st.board, store.conn !== 'open' ? '–' : `${t.sensor_status || '–'}${t.sensor_hz ? ` · ${fixed(t.sensor_hz, 0)} Hz` : ''}`);
       setText(st.pitot, store.conn !== 'open' ? '–' : `${t.gt_status || '–'}${t.gt_hz ? ` · ${fixed(t.gt_hz, 0)} Hz` : ''}`);
       setText(st.drops, store.conn !== 'open' ? '–' : `${t.drops ?? 0}${t.bad_lines ? ` · ${t.bad_lines} bad lines` : ''}`);
+      cal.sync();
+      resp.sync();
     },
   };
 }

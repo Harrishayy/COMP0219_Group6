@@ -27,7 +27,8 @@ def test_dynamics_fit_tunes_the_ema_and_lead():
     sim = SimulatedTunnel(profile="steps", seed=8)
     run = sim.generate(60)
     k, x0 = _truth(sim)
-    r = fit.fit_run(dict(models.default_params(), sqrt_k=k, sqrt_x0=x0), run, "dynamics")
+    ema = dict(filter_kind=1.0, ema_alpha=0.2)   # the default is now Butterworth; this test is about the EMA
+    r = fit.fit_run(dict(models.default_params(), sqrt_k=k, sqrt_x0=x0, **ema), run, "dynamics")
     assert r.ok, r.message
     assert set(r.free) == {"ema_alpha", "lead_tau"}
     assert r.after["mse"] < r.before["mse"]
@@ -40,7 +41,8 @@ def test_diagnose_names_the_static_error():
     k, x0 = _truth(sim)
 
     def findings(**p):
-        params = dict(models.default_params(), **p)
+        # a light smoother: the default 0.75 Hz is sized for the VDAS's lag, and the simulated pitot has none
+        params = dict(models.default_params(), filter_kind=1.0, ema_alpha=0.2, **p)
         return {f["id"]: f for f in metrics.diagnose(models.apply(params, raw), gt, raw["feature"], raw["rho"], params)}
 
     wrong = findings(sqrt_k=k * 1.15, sqrt_x0=x0 + 0.01)

@@ -480,53 +480,6 @@ const runView = { chart: null, sig: '' };
 const runFile = (r) => `${r.dir}/${r.name}_aligned.csv`;
 
 /** Replays a logger run through this page's live views, score and diagnosis (the server's replay source). */
-// ------------------------------------------------------------------------------------ calibration profiles
-// Saved calibrations (calib/tunnel_fit.py, /api/calibrations): the defaults and each `calib tunnel-fit` profile.
-// "Use on board" sets the profile's values on the PC and pushes them; the tare and thermometers are left alone.
-function profileMatches(p, values) {
-  const ema = Number(p.params.filter_kind) >= 0.5;
-  return Object.entries(p.params).every(([k, v]) => {
-    if ((k === 'ema_alpha' && !ema) || (k === 'lpf_hz' && ema)) return true;
-    const b = values[k];
-    return isNum(b) && Math.abs(b - v) <= 1e-4 * Math.max(1, Math.abs(v));
-  });
-}
-
-function calibrationRow(ctx) {
-  const s = ctx.store;
-  let profiles = [];
-  const pick = h('select.select', { 'aria-label': 'Calibration profile', style: { flex: '1' } });
-  const status = h('span.faint');
-  const use = button('Use on board', () => {
-    const p = profiles.find((x) => x.name === pick.value);
-    if (!p) return;
-    ctx.actions.setParams(p.params);
-    ctx.actions.push();
-    ctx.toast(`${p.label}: sent to the board.`);
-  });
-  const row = h('div.row', h('span.label', 'Calibration'), pick, use, status);
-  (async () => {
-    try {
-      profiles = (await (await fetch('/api/calibrations')).json()).profiles;
-      fill(pick, profiles.map((p) => h('option', { value: p.name },
-        isNum(p.mse) ? `${p.label} · MSE ${fixed(p.mse, 3)}` : p.label)));
-      const on = profiles.find((p) => profileMatches(p, s.board));
-      if (on) pick.value = on.name;
-    } catch {
-      fill(pick, h('option', 'Profiles unavailable: is the server running?'));
-      use.disabled = true;
-    }
-  })();
-  const sync = () => {
-    const onBoard = profiles.find((p) => profileMatches(p, s.board));
-    const onPc = profiles.find((p) => profileMatches(p, s.params));
-    status.textContent = !profiles.length ? ''
-      : onBoard ? `Board: ${onBoard.name}`
-        : onPc ? `PC: ${onPc.name}, not pushed` : 'Board: custom settings';
-  };
-  return { row, sync };
-}
-
 function replayRun(ctx, r) {
   ctx.actions.connect({ source: 'replay', replay_file: runFile(r), speed: 1 });
   ctx.toast(`Replaying ${r.name}: the board line is the logger's board speed, the tunnel line its ground truth. No force was logged, so the curve and response fits need a live session.`, 'ok', 8000);
@@ -744,14 +697,12 @@ export default {
         }),
         h('span.spacer'),
         h('label.check', auto, 'Push every change'));
-      const cal = calibrationRow(ctx);
-      const box = h('div', cal.row, row);
+      const box = h('div', row, h('p.faint', 'Calibration and output response: in the Connection card (top right).'));
       // keep the footer in step with the server (5 Hz from the page loop through this observer)
       const sync = () => {
         auto.checked = !!s.tele.auto_push;
         const d = s.dirtyParams().length;
         push.textContent = d ? `Push ${d} change${d > 1 ? 's' : ''} to board` : 'Push to board';
-        cal.sync();
       };
       sync();
       const iv = setInterval(() => (box.isConnected ? sync() : clearInterval(iv)), 300);

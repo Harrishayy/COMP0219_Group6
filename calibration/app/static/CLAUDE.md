@@ -16,7 +16,7 @@ change. The product brief is `PRODUCT.md` at the repo root; the server protocol 
 | The readings strip under the app bar        | `overviewStrip` in `js/core/dashboard.js`; which readouts: `OVERVIEW` in `js/main.js` |
 | App bar, routing, keys 1–6, record button   | `js/main.js`, `js/core/sock.js`                         |
 | Wind Tunnel Logger runs (Tunnel runs panel) | `runsPanel` in `js/sensors/wind-speed.js`; data from `calib/tunnel.py` |
-| Connection popover and chip                 | `js/pages/connection.js`                                |
+| Connection popover and chip                 | `js/pages/connection.js`; its Calibration and Output response fields: `js/core/calibration-controls.js` |
 | Recording, export, replay, activity log     | `js/pages/runs.js`                                      |
 | Results: a saved tunnel run, any moment of it | `js/pages/results.js`; data from `calib/tunnel.py` (`load`, `window`) |
 | Talking to the server, the 200 Hz buffer    | `js/core/store.js`                                      |

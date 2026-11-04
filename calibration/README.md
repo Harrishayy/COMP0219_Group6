@@ -77,7 +77,7 @@ The same work without the dashboard:
 | `session run.json` | One row per settings change in a recording, with its score against the pitot. `--png` plots it. |
 | `export cal.json` / `push cal.json --port P` | Rewrite the header and `SET` file from a calibration JSON / send it to the board. |
 | `sim` | Write a simulated run, for trying things without hardware. |
-| `tunnel-fit run.csv… --name N [--zero fit\|tare]` / `tunnel-fit --list` | Fit a switchable calibration profile to dashboard recordings whose ground truth is noisy (the wood tunnel's GIGA). The ground truth is cleaned first (pressure domain, despiked, zero-phase low-pass), then Cd·A, F₀ and the filter are fitted. Writes `profiles/N.json`, `profiles/N.cmd` and `firmware/include/profiles/N/calibration_profile.h`. Switch on the Wind speed page (Settings › Calibration) or flash its env. |
+| `tunnel-fit run.csv… --name N [--zero fit\|tare]` / `tunnel-fit --list` | Fit a switchable calibration profile to dashboard recordings whose ground truth is noisy (the wood tunnel's GIGA). The ground truth is cleaned first (pressure domain, despiked, zero-phase low-pass), then Cd·A, F₀ and the filter are fitted. Writes `profiles/N.json`, `profiles/N.cmd` and `firmware/include/profiles/N/calibration_profile.h`. Switch in the Connection card (Calibration › Use on board) or flash its env. |
 | `tunnel [run] [--list]` | Score a Wind Tunnel Logger run (`data/tunnel/`) against the tunnel: MSE, bias, σ, drift per minute, error per speed band, and the Cd·A change that would remove a constant percentage error. Newest run by default. |
 
 ## Ground truth

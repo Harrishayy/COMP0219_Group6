@@ -117,7 +117,22 @@ def test_board_boots_with_the_toolkit_curve():
 
     header = (Path(__file__).resolve().parents[2] / "firmware/include/calibration.h").read_text()
     defaults = models.default_params()
-    for name in models.STATIC_PARAMS:
+    for name in (*models.STATIC_PARAMS, "filter_kind", "lpf_hz", "ema_alpha", "lead_tau"):
         m = re.search(rf"#define CAL_{name.upper()} ([-+0-9.eE]+)f", header)
         assert m, f"CAL_{name.upper()} missing from calibration.h"
         assert float(m.group(1)) == pytest.approx(defaults[name]), name
+
+
+def test_uncalibrated_build_matches_the_fallback_profile():
+    """The airspeed_drag_plate_uncalibrated env boots with what the dashboard's "Uncalibrated" choice pushes."""
+    import re
+    from pathlib import Path
+
+    from calib import tunnel_fit
+
+    ini = (Path(__file__).resolve().parents[2] / "firmware/platformio.ini").read_text()
+    env = ini[ini.index("[env:airspeed_drag_plate_uncalibrated]"):].split("\n[", 1)[0]
+    flags = {k.lower(): float(v) for k, v in re.findall(r"-DCAL_(\w+)=([-+0-9.eE]+)f", env)}
+    fallback = tunnel_fit.uncalibrated_profile()["params"]
+    assert flags == {k: fallback[k] for k in flags} and set(flags) >= {"sqrt_k", "sqrt_x0", "filter_kind", "lpf_hz"}
+    assert fallback["sqrt_k"] == models.SQRT_K_THEORY != models.default_params()["sqrt_k"]

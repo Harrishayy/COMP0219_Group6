@@ -135,5 +135,6 @@ def test_api_calibrations(tmp_path, monkeypatch):
     monkeypatch.setattr(tf, "PROFILE_DIR", tmp_path)
     with TestClient(create_app(Engine("sim", window_s=10, seed=1))) as client:
         r = client.get("/api/calibrations").json()
-    assert [p["name"] for p in r["profiles"]] == ["default", "p"]
+    assert [p["name"] for p in r["profiles"]] == ["default", "calibrated_fast", "uncalibrated", "p"]
+    assert r["profiles"][2]["params"]["sqrt_k"] == models.SQRT_K_THEORY
     assert r["profiles"][0]["params"]["sqrt_k"] == models.default_params()["sqrt_k"]

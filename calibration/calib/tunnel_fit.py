@@ -332,10 +332,40 @@ def list_profiles(profile_dir: Path | None = None) -> list[dict]:
     return out
 
 
+# The output smoother's two settings for the default calibration (docs/calibration-2026-11-04.md): 0.75 Hz delays
+# the board ~0.3 s, under the VDAS's 0.40–0.48 s lag, which the logger's scoring rewards; 2 Hz is the most accurate
+# against the true speed (VDAS lag removed) and still kills the plate's 15.7 Hz ringing.
+LAG_MATCHED_HZ, FAST_HZ = 0.75, 2.0
+
+
 def default_profile() -> dict:
-    """The settings the board boots with when no profile is chosen (the toolkit's defaults)."""
+    """The settings the board boots with when no profile is chosen (the toolkit's defaults: the 4 Nov tunnel fit)."""
     d = models.default_params()
-    return {"name": "default", "label": "Default (theory Cd·A, F₀ from TARE)", "params": {k: d[k] for k in PROFILE_KEYS}}
+    return {"name": "default", "label": "Calibrated, lag-matched 0.75 Hz (default)", "short": "Lag-matched 0.75 Hz",
+            "params": {k: d[k] for k in PROFILE_KEYS}}
+
+
+def fast_profile() -> dict:
+    """The default calibration with the fast smoother: the true speed, ~0.1 s behind, ahead of the VDAS."""
+    d = {**models.default_params(), "filter_kind": float(models.FILTER_BUTTERWORTH), "lpf_hz": FAST_HZ}
+    return {"name": "calibrated_fast", "label": f"Calibrated, fast {FAST_HZ:g} Hz", "short": f"Fast {FAST_HZ:g} Hz",
+            "params": {k: d[k] for k in PROFILE_KEYS}}
+
+
+def uncalibrated_profile() -> dict:
+    """The fallback: theory Cd·A, zero from TARE, 10 Hz smoother (models.UNCALIBRATED)."""
+    d = {**models.default_params(), **models.UNCALIBRATED}
+    return {"name": "uncalibrated", "label": "Uncalibrated: theory Cd·A (fallback)", "short": "Uncalibrated",
+            "params": {k: d[k] for k in PROFILE_KEYS}}
+
+
+def builtin_profiles() -> list[dict]:
+    """What the dashboard's Calibration picker always offers, before the saved profiles."""
+    return [default_profile(), fast_profile(), uncalibrated_profile()]
+
+
+def all_profiles() -> list[dict]:
+    return [*builtin_profiles(), *list_profiles()]
 
 
 def summary_lines(record: dict) -> list[str]:

@@ -202,8 +202,10 @@ limited to `sqrt_k, sqrt_x0, lc_n_per_count, filter_kind, ema_alpha, lpf_hz, lea
 holds only those `SET` lines, so a switch never touches the tare or the thermometers. Its header,
 `firmware/include/profiles/<name>/calibration_profile.h`, is built by an env with `-DCAL_PROFILE -I include/profiles/<name>`
 (`calibration.h` then includes it instead of `calibration_generated.h`). `GET /api/calibrations` lists
-`{profiles: [{name, label, params, mse?, zero?, still_air_mps?}], dir}`, with the defaults first. The Wind speed page
-applies one with `set_params` and `push_params`.
+`{profiles: [{name, label, short?, params, mse?, zero?, still_air_mps?}], dir}`, with the built-in ones first
+(`default`: the 4 Nov tunnel calibration, lag-matched 0.75 Hz; `calibrated_fast`: the same at 2 Hz; `uncalibrated`:
+theory Cd·A, `models.UNCALIBRATED`). The Connection popover applies one with `set_params` and `push_params`; its Output
+response row sets `filter_kind` 0 and `lpf_hz` on the board directly (`SET`).
 
 ## 6. Live app websocket protocol (`ws://localhost:8765/ws`)
 

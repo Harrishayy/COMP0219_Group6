@@ -41,13 +41,16 @@
 #endif
 
 // ---- Square-root model for the drag plate: v = sqrt(sqrt_k * (F - sqrt_x0) / rho) --------
-// sqrt_k = 2 / (Cd * A), A in m². The default is our body, the hollow hemisphere open to the wind (catapult.stl:
-// 86 mm outside, 80 mm inside; Cd 1.42 on the outer rim's 58.1 cm², Cd*A = 82.5 cm²), so about 2.0 g of drag at
-// 2 m/s and 50 g at 10 m/s; the arm is not included. It must stay equal to the toolkit's default
-// (calibration/calib/models.py, test_chain.py checks): 1.0 would mean a 2 m² plate, so a few hundred grams
-// would read as 2 m/s.
+// sqrt_k = 2 / (Cd * A) in the load cell's units. The default is the tunnel calibration of 4 Nov 2026 (white
+// tunnel, VDAS ground truth, two runs 2-10 m/s; each run on its own gave the same 145): F is still in the
+// placeholder units of CAL_LC_N_PER_COUNT 1e-5, so rescaling the cell needs sqrt_k * lc_n_per_count kept fixed.
+// The zero is the fan-off TARE (sqrt_x0 0): TARE with the fan off before every run. Theory for our body, the
+// hollow hemisphere open to the wind (catapult.stl: 86 mm outside, 80 mm inside; Cd 1.42 on 58.1 cm²,
+// Cd*A = 82.5 cm²), is 242.5: the "uncalibrated" fallback (dashboard Calibration picker, or the
+// airspeed_drag_plate_uncalibrated env). It must stay equal to the toolkit's default
+// (calibration/calib/models.py, test_chain.py checks).
 #ifndef CAL_SQRT_K
-#define CAL_SQRT_K 242.5f
+#define CAL_SQRT_K 145.1f
 #endif
 #ifndef CAL_SQRT_X0
 #define CAL_SQRT_X0 0.0f
@@ -69,10 +72,11 @@
 #define CAL_FILTER_KIND 0.0f  // output smoother: 0 = Butterworth on lpf_hz, 1 = EMA on ema_alpha
 #endif
 #ifndef CAL_LPF_HZ
-#define CAL_LPF_HZ 10.0f  // 2nd-order Butterworth cutoff on the output; >= 100 disables it
+#define CAL_LPF_HZ 0.75f  // 2nd-order Butterworth cutoff on the output; >= 100 disables it. 0.75 Hz (~0.3 s
+                          // delay) kills the plate's 15.7 Hz ringing and stays under the VDAS's 0.4-0.5 s lag
 #endif
 #ifndef CAL_EMA_ALPHA
-#define CAL_EMA_ALPHA 1.0f  // EMA: y = alpha*x + (1-alpha)*y_prev, 0 < alpha <= 1; 1 = pass-through
+#define CAL_EMA_ALPHA 0.2f  // EMA: y = alpha*x + (1-alpha)*y_prev, 0 < alpha <= 1; 1 = pass-through
 #endif
 
 // ---- Air temperature: which thermometer feeds the density, and each one's offset --------

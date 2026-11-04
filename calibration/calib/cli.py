@@ -503,7 +503,7 @@ def cmd_tunnel_fit(a):
     from .recorder import runs_dir
 
     if a.list:
-        for p in [tunnel_fit.default_profile(), *tunnel_fit.list_profiles()]:
+        for p in tunnel_fit.all_profiles():
             mse = f"MSE {p['mse']:.3f}" if p.get("mse") is not None else ""
             print(f"{p['name']:28s} {mse:10s} {p['label']}")
         return

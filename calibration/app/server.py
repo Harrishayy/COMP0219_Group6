@@ -1023,7 +1023,7 @@ def create_app(engine: Engine) -> FastAPI:
     @app.get("/api/calibrations")
     async def calibrations():
         """Calibration profiles to switch the board between (calib/tunnel_fit.py): the defaults, then each saved one."""
-        return JSONResponse({"profiles": [tunnel_fit.default_profile(), *tunnel_fit.list_profiles()],
+        return JSONResponse({"profiles": tunnel_fit.all_profiles(),
                              "dir": str(tunnel_fit.PROFILE_DIR)})
 
     @app.get("/api/tunnel/window")

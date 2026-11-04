@@ -55,14 +55,20 @@ class ParamSpec:
         return asdict(self)
 
 
+# Default calibration (4 Nov 2026, white tunnel VDAS; firmware/include/calibration.h has the same values). k is in
+# the load cell's placeholder units (lc_n_per_count 1e-5): rescaling the cell needs k · lc_n_per_count kept fixed.
+# The zero is the fan-off TARE (sqrt_x0 0). UNCALIBRATED below is the theory fallback.
+SQRT_K_THEORY = 242.5      # 2/(Cd·A) for the Ø86 mm open hemisphere, Cd 1.42 (calibration.h)
+SQRT_K_TUNNEL = 145.1      # fitted to the 4 Nov VDAS runs, the same from each run on its own
+
 PARAMS = (
-    ParamSpec("sqrt_k", 242.5, 1.0, 5000.0, 0.1, "1/m²", "k = 2/(Cd·A)", "static"),
+    ParamSpec("sqrt_k", SQRT_K_TUNNEL, 1.0, 5000.0, 0.1, "1/m²", "k = 2/(Cd·A)", "static"),
     ParamSpec("sqrt_x0", 0.0, -1.0, 1.0, 0.0001, "N", "Zero-flow force F0", "static"),
     ParamSpec("lc_offset", 0.0, -1e7, 1e7, 1.0, "counts", "Load-cell tare (set by TARE)", "board"),
     ParamSpec("lc_n_per_count", 1.0e-5, 1e-8, 1e-2, 1e-8, "N/count", "Load-cell scale (from `calib weights`)", "board"),
-    ParamSpec("filter_kind", 1.0, 0.0, 1.0, 1.0, "", "Output smoother: 1 = EMA on ema_alpha, 0 = Butterworth on lpf_hz", "dynamics"),
+    ParamSpec("filter_kind", 0.0, 0.0, 1.0, 1.0, "", "Output smoother: 1 = EMA on ema_alpha, 0 = Butterworth on lpf_hz", "dynamics"),
     ParamSpec("ema_alpha", 0.2, 0.0001, 1.0, 0.0001, "", "EMA weight of the newest sample: V = a·V_new + (1−a)·V_prev", "dynamics"),
-    ParamSpec("lpf_hz", 10.0, 0.0, 99.0, 0.1, "Hz", "Butterworth cutoff (2nd order: damps the plate's ringing)", "dynamics"),
+    ParamSpec("lpf_hz", 0.75, 0.0, 99.0, 0.1, "Hz", "Butterworth cutoff (2nd order: damps the plate's ringing)", "dynamics"),
     ParamSpec("lead_tau", 0.0, 0.0, 0.5, 0.001, "s", "First-order lead to cancel the plate's lag; 0 = off", "dynamics"),
     ParamSpec("rho_ref", RHO_REF, 1.0, 1.4, 0.001, "kg/m³", "Density used when the stream has no rho column", "environment"),
     ParamSpec("temp_source", 0.0, 0.0, len(THERMOMETERS) - 1.0, 1.0, "",
@@ -78,6 +84,11 @@ STATIC_PARAMS = ("sqrt_k", "sqrt_x0")
 
 def default_params() -> dict[str, float]:
     return {p.name: p.value for p in PARAMS}
+
+
+# The fallback when the tunnel calibration is in doubt: theory Cd·A, the zero from TARE, a light 10 Hz smoother
+# (the defaults before 4 Nov 2026). Reads about 29 % high on the 4 Nov tunnel runs.
+UNCALIBRATED = {"sqrt_k": SQRT_K_THEORY, "sqrt_x0": 0.0, "filter_kind": 0.0, "lpf_hz": 10.0, "lead_tau": 0.0}
 
 
 def bounds() -> dict[str, tuple[float, float]]:
