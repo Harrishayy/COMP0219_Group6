@@ -30,7 +30,7 @@ Step progress kept in a sensor module resets on a reload. Firmware still needs `
 | Path | What it is | How it works |
 | --- | --- | --- |
 | `firmware/` | PlatformIO project, Arduino core for STM32 | One env per app in `platformio.ini`; `src/apps/*.cpp` are the entry points |
-| `firmware/src/apps/airspeed.cpp` | Competition firmware | 200 Hz TIM5 tick: feature → model (uses ρ) → median-3 → lead → EMA or Butterworth. Serial commands: MODE, GET, SET, TARE, ENV, STATS. Transducer picked by `AIRSPEED_METHOD` |
+| `firmware/src/apps/airspeed.cpp` | Competition firmware | 200 Hz TIM5 tick: feature → model (uses ρ) → median-3 → lead → EMA or Butterworth. Serial commands: MODE, GET, SET, TARE, ENV, STATS. The blue USER button zeroes the load cell (no zero at power-on). Transducer picked by `AIRSPEED_METHOD` |
 | `firmware/src/apps/` (others) | Bench tools | `i2c_scan`, `env_monitor`, `loadcell_test`, `encoder_test`, `hall_test`: flash, then `pio device monitor` |
 | `firmware/include/` | Configuration | `board_config.h`: pins, I²C addresses, rates. `calibration.h`: defaults for every `CAL_*`; `calibration_generated.h` (written by the toolkit) overrides them |
 | `firmware/lib/airmath/` | Pure C++ maths | Density, temperature fusion, models, filters. Unit-tested natively (`pio test -e native`) |
@@ -121,7 +121,8 @@ plus a row in the command table in `calibration/README.md`.
 `calibration/profiles/<n>.{json,cmd}` and `firmware/include/profiles/<n>/calibration_profile.h`. Switch a running board in the Connection card (the chip at the top right: Calibration › Use on board), or flash `pio run -e airspeed_drag_plate_<n> -t upload` (add the env
 to `platformio.ini` and `ci.yml`, copying the `giga_20261029` ones). Flash `airspeed_drag_plate`, or pick Default, to go back.
 The default is itself a tunnel calibration (4 Nov 2026, white tunnel VDAS: `sqrt_k` 145.1, zero from a fan-off TARE,
-Butterworth 0.75 Hz), so TARE with the fan off before every run. If it is in doubt, pick "Uncalibrated: theory Cd·A"
+Butterworth 0.75 Hz), so zero it with the fan off before every run: press the blue USER button (no laptop needed, so it works with
+only the Wind Tunnel Logger on someone else's laptop) or send TARE. The board does not zero itself at power-on or RESET. If it is in doubt, pick "Uncalibrated: theory Cd·A"
 in the same picker (Output response there switches 0.75 Hz / 2 Hz) or flash `airspeed_drag_plate_uncalibrated` (`calib/models.py` `UNCALIBRATED`).
 `--zero fit` bakes in that day's zero offset; `--zero tare` trusts a fan-off TARE.
 

@@ -9,6 +9,8 @@
 //   GET              "#cal {json}": every live parameter plus method, build and environment
 //   SET <name> <v>   change a live parameter (RAM only, lost on reset)
 //   TARE | ENV | STATS | HELP
+//
+// Drag plate: the blue USER button zeroes the load cell, so no laptop software is needed to tare. See "Tare" below.
 #include <Arduino.h>
 #include <Wire.h>
 
@@ -196,6 +198,141 @@ struct Stats {
   uint32_t max_busy_us = 0;
 } g_stats;
 
+// ---- Tare --------------------------------------------------------------------------------
+// The calibration's zero is a fan-off tare (sqrt_x0 0), and on the day the board runs on another laptop with only
+// the Wind Tunnel Logger, which never writes to it. So the blue USER button zeroes it: press it with the fan off
+// and still air. It refuses a zero taken while the plate is moving and keeps the old one. There is no zero at
+// power-on (the board boots on the flashed lc_offset); press USER before each run. The TARE command is not
+// checked, as before (the dashboard warns when the fan is on). While a tare runs the output reads 0 and the LED
+// stays on; afterwards the filters restart from the new zero. A refused tare flickers the LED for 2 s.
+
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+enum class TareSource : uint8_t { kCommand, kButton };
+
+namespace tare {
+constexpr float kButtonWindowS = 1.0f;
+constexpr float kCommandWindowS = 0.5f;   // unchanged: the dashboard reads the zero back 0.6 s after TARE
+constexpr uint32_t kOverrunMs = 3000;     // a tare this late past its window lost its amplifier: cancel it
+// Spread of the raw counts allowed in a tare window. On the NAU7802 at 320 SPS still air reads 180-280 counts and
+// the fan on 330 and up, mostly over 700 (4-5 Nov tunnel runs). 600 is calib/recal.py's STILL_SD_N (0.006 at
+// lc_n_per_count 1e-5): it lets a still plate through on a vibrating bench and stops a running fan.
+constexpr float kMaxSdCounts = 600.0f;
+constexpr uint32_t kButtonDebounceMs = 30;
+constexpr uint32_t kRefusedBlinkMs = 2000;
+}  // namespace tare
+
+struct TareState {
+  bool running = false;
+  TareSource source = TareSource::kButton;
+  uint32_t started_ms = 0;
+  uint32_t window_ms = 0;
+  uint32_t refused_until_ms = 0;
+} g_tare;
+bool g_restart_chain = false;
+
+const char* tare_name(TareSource s) {
+  return s == TareSource::kCommand ? "command" : "USER button";
+}
+
+bool holding_zero() { return g_tare.running; }
+
+bool begin_tare(TareSource source, uint32_t now) {
+  if (!g_load_cell.present()) {
+    Serial.println("#err tare: no load-cell amplifier answers, offset unchanged");
+    g_tare.refused_until_ms = now + tare::kRefusedBlinkMs;
+    return false;
+  }
+  float seconds = source == TareSource::kButton ? tare::kButtonWindowS : tare::kCommandWindowS;
+  long n = lroundf(g_load_cell.sample_hz() * seconds);
+  if (n < 1) n = 1;
+  g_load_cell.start_tare(static_cast<uint16_t>(n), source == TareSource::kCommand ? 0.0f : tare::kMaxSdCounts);
+  g_tare.running = true;
+  g_tare.source = source;
+  g_tare.started_ms = now;
+  g_tare.window_ms = static_cast<uint32_t>(seconds * 1000.0f);
+  if (source == TareSource::kCommand) {
+    Serial.println("#ok taring (keep the plate still, ~0.5 s)");
+  } else {
+    Serial.println("#tare USER button: zeroing the load cell, keep the fan off (1 s)");
+  }
+  return true;
+}
+
+void finish_tare(bool accepted, uint32_t now) {
+  g_tare.running = false;
+  const TareSource src = g_tare.source;
+  if (accepted) {
+    g_params.lc_offset = static_cast<float>(g_load_cell.offset());
+    Serial.print("#ok lc_offset=");
+    Serial.print(g_load_cell.offset());
+    Serial.print(" sd=");
+    Serial.print(g_load_cell.last_tare_sd(), 0);
+    Serial.print(" counts (");
+    Serial.print(tare_name(src));
+    Serial.println(" tare)");
+    return;
+  }
+  g_tare.refused_until_ms = now + tare::kRefusedBlinkMs;
+  Serial.print("#err tare refused: the plate is moving (spread ");
+  Serial.print(g_load_cell.last_tare_sd(), 0);
+  Serial.print(" counts, still is under ");
+  Serial.print(tare::kMaxSdCounts, 0);
+  Serial.println("); fan off, wait for still air, press USER again. Offset unchanged");
+}
+
+// Idle-time work: report a finished tare, or cancel one whose amplifier went away.
+void poll_tare(uint32_t now) {
+  if (!g_tare.running) return;
+  TareResult r = g_load_cell.take_tare_result();
+  if (r == TareResult::kNone) {
+    if (now - g_tare.started_ms < g_tare.window_ms + tare::kOverrunMs) return;
+    g_load_cell.cancel_tare();
+    Serial.println("#err tare: the load cell stopped answering mid-tare, offset unchanged");
+    r = TareResult::kRefused;
+  }
+  finish_tare(r == TareResult::kAccepted, now);
+}
+
+void poll_button(uint32_t now) {
+  static bool down = false, fired = false;
+  static uint32_t changed_ms = 0;
+  bool d = digitalRead(board::kPinUserButton) == LOW;
+  if (d != down) {
+    down = d;
+    changed_ms = now;
+    fired = false;
+    return;
+  }
+  if (down && !fired && now - changed_ms >= tare::kButtonDebounceMs) {
+    fired = true;
+    if (!g_tare.running) begin_tare(TareSource::kButton, now);
+  }
+}
+
+void restart_chain() {
+  g_median.reset();
+  g_lead.reset();
+  g_lpf.reset();
+  g_ema.reset();
+}
+#endif
+
+void update_led(uint32_t now) {
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  if (holding_zero()) {
+    digitalWrite(board::kPinLed, HIGH);
+    return;
+  }
+  if (static_cast<int32_t>(g_tare.refused_until_ms - now) > 0) {
+    digitalWrite(board::kPinLed, (now / 50) & 1 ? HIGH : LOW);  // 10 Hz flicker
+    return;
+  }
+#else
+  (void)now;
+#endif
+  if ((g_seq & 0x7F) == 0) digitalToggle(board::kPinLed);  // ~1.5 Hz heartbeat
+}
+
 // v is last: the course's Wind Tunnel Logger takes the last field of a comma line as the speed, so it reads the
 // right number even if the board is left in MODE D.
 void print_header() { Serial.println("#cols,n,feature,rho,temp_c,pressure_pa,v"); }
@@ -223,6 +360,18 @@ void emit(float v, float feature, float rho) {
 void tick() {
   float rho = g_env.density();
   float feature = read_feature();
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  if (holding_zero()) {  // taring: the plate is meant to be in still air, and the old zero may be far off
+    g_restart_chain = true;
+    emit(0.0f, feature, rho);
+    ++g_seq;
+    return;
+  }
+  if (g_restart_chain) {
+    restart_chain();
+    g_restart_chain = false;
+  }
+#endif
   float v = model(feature, rho);
   // Median before lead: the lead turns each quantisation step of a rotor's rate into a
   // spike train the median can no longer remove, and the LPF then turns that into bias.
@@ -266,6 +415,9 @@ void print_cal() {
 
 void print_help() {
   Serial.println("#cmds: MODE V | MODE D | HDR | GET | SET <name> <value> | TARE | ENV | STATS | HELP");
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  Serial.println("#tare: press the blue USER button (fan off, still air), or send TARE");
+#endif
   Serial.print("#params:");
   for (const ParamEntry& p : kParams) {
     Serial.print(' ');
@@ -326,8 +478,7 @@ void handle_line(char* line) {
     handle_set(args);
   } else if (strcasecmp(line, "TARE") == 0) {
 #if AIRSPEED_METHOD == METHOD_DRAG_PLATE
-    g_load_cell.start_tare();
-    Serial.println("#ok taring (keep the plate still, ~0.5 s)");
+    begin_tare(TareSource::kCommand, millis());
 #else
     Serial.println("#err TARE only applies to the drag plate");
 #endif
@@ -386,6 +537,10 @@ void setup() {
   transducer_begin();
   apply_params();
 
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  pinMode(board::kPinUserButton, INPUT_PULLUP);
+#endif
+
   g_tick_timer.setOverflow(static_cast<uint32_t>(board::kSampleHz), HERTZ_FORMAT);
   g_tick_timer.attachInterrupt(on_tick);
   g_tick_timer.resume();
@@ -401,10 +556,15 @@ void loop() {
     tick();
     uint32_t busy = micros() - t0;
     if (busy > g_stats.max_busy_us) g_stats.max_busy_us = busy;
-    if ((g_seq & 0x7F) == 0) digitalToggle(board::kPinLed);  // ~1.5 Hz heartbeat
+    update_led(millis());
     return;
   }
-  // Idle time between ticks: slow sensors and commands.
-  g_env.update(millis());
+  // Idle time between ticks: slow sensors, commands and the tare.
+  uint32_t now = millis();
+  g_env.update(now);
   poll_serial();
+#if AIRSPEED_METHOD == METHOD_DRAG_PLATE
+  poll_button(now);
+  poll_tare(now);
+#endif
 }

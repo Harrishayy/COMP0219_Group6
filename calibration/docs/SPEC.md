@@ -26,7 +26,9 @@ are never averaged; with the chosen one missing `t_air` is `nan` and `rho` uses 
 Commands PC → Nucleo: `SET <name> <value>` (→ `#ok name=value` / `#err reason`, RAM only),
 `GET` (→ `#cal {json}` with every live param + method, build date, rho, temp, and on the drag plate
 `lc_frontend` (`weight_i2c` | `nau7802` | `none`) and `lc_sps` (its conversions per second)), `MODE V|D`, `TARE`
-(load-cell zero, non-blocking), `HDR`, `ENV`, `STATS`, `HELP`. `#cal` `method` must be `drag_plate`; anything
+(load-cell zero, non-blocking), `HDR`, `ENV`, `STATS`, `HELP`. The drag plate is also zeroed by its USER button
+(README, "Tare without a laptop"; nothing zeroes it at power-on); each tare ends in `#ok lc_offset=<counts> sd=<counts> counts (<source> tare)`
+or `#err tare refused …`, and the board streams `0.000` while it runs. A `GET` after one shows the new `lc_offset`. `#cal` `method` must be `drag_plate`; anything
 else is logged as an error (flash the drag-plate build).
 
 Firmware param names (also the export keys; header macro is `CAL_<UPPER_NAME>`):

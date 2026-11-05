@@ -92,8 +92,14 @@ void LoadCell::accept(int32_t raw) {
   ++sample_total_;
   raw_ = raw;
   if (tare_left_ > 0) {
-    tare_sum_ += raw_;
-    if (--tare_left_ == 0) offset_ = static_cast<int32_t>(tare_sum_ / tare_total_);
+    tare_.add(raw_);
+    if (--tare_left_ == 0) {
+      tare_mean_ = tare_.mean();
+      tare_sd_ = tare_.sd();
+      bool still = !(tare_max_sd_ > 0.0f) || tare_sd_ <= tare_max_sd_;
+      if (still) offset_ = tare_mean_;
+      tare_result_ = still ? TareResult::kAccepted : TareResult::kRefused;
+    }
   }
 }
 
@@ -131,10 +137,11 @@ bool LoadCell::poll() {
   return true;
 }
 
-void LoadCell::start_tare(uint16_t samples) {
+void LoadCell::start_tare(uint16_t samples, float max_sd_counts) {
   if (samples == 0) samples = static_cast<uint16_t>(max(1.0f, sample_hz() * 0.5f));
-  tare_sum_ = 0;
-  tare_total_ = samples;
+  tare_.reset();
+  tare_max_sd_ = max_sd_counts;
+  tare_result_ = TareResult::kNone;
   tare_left_ = samples;
 }
 

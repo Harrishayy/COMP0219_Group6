@@ -20,7 +20,8 @@ Change them there, not in the apps.
 | LM35 Vout                      | PC3 (CN7 pin 37)       | ADC1_IN13; LM35 powered from 5V (CN7 pin 18), 100 kΩ Vout to GND |
 | Hall switch output             | D7 (PA8)               | EXTI, internal pull-up (Allegro switches are open-drain)    |
 | Serial to PC                   | PA2 / PA3 (USART2)     | ST-LINK virtual COM port, no wiring needed                   |
-| LED                            | LD2 (PA5)              | Heartbeat blink while streaming                              |
+| LED                            | LD2 (PA5)              | Heartbeat blink while streaming; on while taring, 10 Hz flicker when a tare is refused |
+| USER button (blue, B1)         | PC13                   | On the Nucleo, no wiring. Zeroes the drag plate's load cell (fan off) |
 
 **Pins the IKS4A1 already uses** (sensor interrupt lines, from ST's Zephyr shield definition):
 A2, A3, A4, A5, D4, D6. Do not wire anything else to them. Most IKS4A1 interrupt outputs are push-pull

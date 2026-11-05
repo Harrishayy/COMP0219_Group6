@@ -149,12 +149,19 @@ changed over serial with `SET <name> <value>` without reflashing. See [`docs/cal
 | `HDR`              | Re-print the `#cols,...` header (resync after reconnecting)                 |
 | `GET`              | `#cal {json}`: method, build, every parameter, current ρ and T             |
 | `SET <name> <v>`   | `#ok name=v` / `#err ...`; RAM only, lost on reset                          |
-| `TARE`             | Re-zero the load cell from the next 160 samples (drag plate only)          |
+| `TARE`             | Re-zero the load cell from the next 0.5 s of samples (drag plate only); `#ok taring`, then `#ok lc_offset=… sd=… counts (command tare)` |
 | `ENV`              | `#env ...` with every temperature source, RH, p, ρ                          |
 | `STATS`            | `#stats n=... overruns=... max_busy_us=...`                                 |
 | `HELP`             | Command and parameter list                                                  |
 
 Parameters: `rotor_slope rotor_offset rotor_min_hz rotor_window_ms sqrt_k sqrt_x0 lc_offset lc_n_per_count lead_tau lpf_hz filter_kind ema_alpha`.
+
+**Tare without a laptop (drag plate).** The blue USER button (B1) zeroes the load cell from 1 s of readings. Press
+it with the fan off and still air. It refuses a window whose raw counts spread more than 600 (still air is about
+200, the fan on mostly over 700): the old zero stays and the LED flickers for 2 s. There is no zero at power-on or
+RESET: the board boots on the flashed `lc_offset` (0), so press USER before every run. While a tare runs the output
+reads `0.000` and the LED stays on. It prints `#tare …` and then `#ok lc_offset=…` or `#err …`; the Wind Tunnel
+Logger skips `#` lines. `TARE` over serial does the same from 0.5 s, unchecked.
 
 The output smoother is chosen with `filter_kind`: `0` = 2nd-order Butterworth at `lpf_hz`, `1` = EMA
 `y = α·x + (1−α)·y_prev` with `α = ema_alpha`. The EMA's −3 dB cutoff is about `α·200/(2π(1−α))` Hz.

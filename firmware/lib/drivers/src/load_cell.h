@@ -9,7 +9,10 @@
 #include <SparkFun_Qwiic_Scale_NAU7802_Arduino_Library.h>
 #include <Wire.h>
 
+#include "still_mean.h"
+
 enum class LoadCellFrontend : uint8_t { kNone, kWeightI2c, kNau7802 };
+enum class TareResult : uint8_t { kNone, kAccepted, kRefused };
 
 struct LoadCellConfig {
   uint8_t addr_weight_i2c;   // M5Stack Unit Weight I2C, 0x26 by default
@@ -30,8 +33,19 @@ class LoadCell {
   float force_n() const { return static_cast<float>(raw_ - offset_) * scale_; }
 
   // Non-blocking tare: the next `samples` readings are averaged into the zero offset. 0 = half a second's worth.
-  void start_tare(uint16_t samples = 0);
+  // With max_sd_counts > 0 the zero is kept only if the readings were that still (standard deviation in counts);
+  // otherwise the old offset stays and the tare reports kRefused.
+  void start_tare(uint16_t samples = 0, float max_sd_counts = 0.0f);
   bool taring() const { return tare_left_ > 0; }
+  void cancel_tare() { tare_left_ = 0; }  // the offset is left as it was; no result is reported
+  // The outcome of the last finished tare, once: kNone until one finishes, then kAccepted or kRefused.
+  TareResult take_tare_result() {
+    TareResult r = tare_result_;
+    tare_result_ = TareResult::kNone;
+    return r;
+  }
+  float last_tare_sd() const { return tare_sd_; }       // spread of the last tare's readings, counts
+  int32_t last_tare_mean() const { return tare_mean_; }  // their mean (the offset, if it was accepted)
 
   int32_t offset() const { return offset_; }
   void set_offset(int32_t offset) { offset_ = offset; }
@@ -71,6 +85,9 @@ class LoadCell {
   int32_t offset_ = 0;
   float scale_ = 1.0f;
   uint16_t tare_left_ = 0;
-  uint16_t tare_total_ = 0;
-  int64_t tare_sum_ = 0;
+  airmath::StillMean tare_;
+  float tare_max_sd_ = 0.0f;
+  float tare_sd_ = 0.0f;
+  int32_t tare_mean_ = 0;
+  TareResult tare_result_ = TareResult::kNone;
 };

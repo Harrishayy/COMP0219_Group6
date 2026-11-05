@@ -7,6 +7,7 @@
 #include "airspeed_models.h"
 #include "filters.h"
 #include "rate_estimator.h"
+#include "still_mean.h"
 
 using namespace airmath;
 
@@ -93,6 +94,40 @@ void test_rate_estimator_with_wrap() {
   TEST_ASSERT_FLOAT_WITHIN(1.0f, 10000.0f, r.rate(20000));
 }
 
+void test_median3_reset_reprimes() {
+  Median3 m;
+  m.update(1.0f);
+  m.update(1.0f);
+  m.update(1.0f);
+  m.reset();
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 7.0f, m.update(7.0f));  // primes again: passes the first sample through
+}
+
+void test_still_mean_constant_and_alternating() {
+  StillMean s;
+  TEST_ASSERT_EQUAL_INT32(0, s.mean());
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, s.sd());
+  for (int i = 0; i < 640; ++i) s.add(-1209);
+  TEST_ASSERT_EQUAL_UINT32(640, s.count());
+  TEST_ASSERT_EQUAL_INT32(-1209, s.mean());
+  TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.0f, s.sd());
+  s.reset();
+  for (int i = 0; i < 640; ++i) s.add(i % 2 ? 1200 : 800);  // 1000 +- 200
+  TEST_ASSERT_EQUAL_INT32(1000, s.mean());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, s.sd());
+}
+
+void test_still_mean_large_counts_keep_precision() {
+  StillMean s;
+  for (int i = 0; i < 640; ++i) s.add(8388000 + (i % 3) - 1);  // near the 24-bit limit, mean exactly 8388000
+  TEST_ASSERT_EQUAL_INT32(8388000, s.mean());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.8165f, s.sd());              // sqrt(2/3)
+  s.reset();
+  s.add(-3);
+  s.add(-4);  // mean -3.5 rounds away from zero
+  TEST_ASSERT_EQUAL_INT32(-4, s.mean());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_isa_sea_level_density);
@@ -104,5 +139,8 @@ int main() {
   RUN_TEST(test_lead_compensator);
   RUN_TEST(test_median3_removes_spike);
   RUN_TEST(test_rate_estimator_with_wrap);
+  RUN_TEST(test_median3_reset_reprimes);
+  RUN_TEST(test_still_mean_constant_and_alternating);
+  RUN_TEST(test_still_mean_large_counts_keep_precision);
   return UNITY_END();
 }

@@ -44,6 +44,10 @@ class ButterworthLowPass {
 class Median3 {
  public:
   float update(float x);
+  void reset() {
+    count_ = 0;
+    idx_ = 0;
+  }
 
  private:
   float buf_[3] = {0.0f, 0.0f, 0.0f};

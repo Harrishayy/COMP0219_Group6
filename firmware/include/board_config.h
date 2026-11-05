@@ -34,6 +34,7 @@ constexpr uint32_t kPinHallDigital = PA8;
 constexpr uint8_t kHallPulsesPerRev = 1;  // magnets on the rotor
 
 constexpr uint32_t kPinLed = LED_BUILTIN;  // LD2, PA5
+constexpr uint32_t kPinUserButton = PC13;  // B1 USER (blue), low while pressed; the drag plate's tare button
 
 // bridge_probe only: A0 (PA0) as a voltmeter on a jumper. Shared with encoder A: unplug the encoder first.
 constexpr uint32_t kPinProbe = PA0;

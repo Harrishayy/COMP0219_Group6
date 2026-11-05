@@ -232,7 +232,8 @@ is drawn in green on the charts.
    After one, the board is back on the flashed default.
 3. **Check it:** in the Connection card, Calibration says "Board: Calibrated, lag-matched 0.75 Hz (default)", and Output response says
    "Board: Butterworth 0.75 Hz". Or send `GET`: `sqrt_k=145.1`, `sqrt_x0=0`, `filter_kind=0`, `lpf_hz=0.75`.
-4. **TARE with the fan off before every run.** The board boots with no tare (`CAL_LC_OFFSET` 0), and the zero
-   drifts by several grams between runs.
+4. **Zero it with the fan off before every run: press the blue USER button** (since 5 Nov; README, "Tare without a
+   laptop"), or send TARE. The board boots with no tare (`CAL_LC_OFFSET` 0) and does not zero itself, and the zero
+   drifts by several grams between runs, so press USER with the fan off just before each one.
 5. **Fallback:** pick Uncalibrated in the Connection card, or flash
    `pio run -e airspeed_drag_plate_uncalibrated -t upload`.
