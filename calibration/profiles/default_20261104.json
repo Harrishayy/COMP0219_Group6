@@ -1,0 +1,60 @@
+{
+ "model": "sqrt",
+ "method": "METHOD_DRAG_PLATE",
+ "params": {
+  "sqrt_k": 145.1,
+  "sqrt_x0": 0.0,
+  "lc_n_per_count": 1e-05,
+  "filter_kind": 0.0,
+  "ema_alpha": 0.2,
+  "lpf_hz": 0.75,
+  "lead_tau": 0.0
+ },
+ "fit": {
+  "static": {
+   "sqrt_k": 145.1,
+   "sqrt_x0": 0.0,
+   "zero": "tare",
+   "k_range": [
+    145.1,
+    145.1
+   ],
+   "still_air_mps": 0.0
+  },
+  "method": "Frozen copy of the default calibration as flashed on 4-5 Nov 2026 (firmware/include/calibration.h at commit 7a1ab85; docs/calibration-2026-11-04.md): k fitted to the 4 Nov white-tunnel VDAS runs, zero from a fan-off tare, Butterworth 0.75 Hz lag-matched to the VDAS. Kept here so it can be flashed back even if calibration.h changes.",
+  "scored_band_mps": [
+   2.0,
+   10.0
+  ],
+  "sources": [
+   "run_20261104_151708",
+   "run_20261104_152520"
+  ]
+ },
+ "metrics_after": {
+  "run_20261104_151708": {
+   "mse": 0.07205781021459792,
+   "bias": 0.17842288570448672,
+   "mse_all": 0.0827751378690262,
+   "n": 543,
+   "mse_below_2": 0.06235092211931394
+  },
+  "run_20261104_152520": {
+   "mse": 0.13089082352116563,
+   "bias": 0.16707392858537765,
+   "mse_all": 0.1557392976587648,
+   "n": 351,
+   "mse_below_2": 0.6308718949813434
+  },
+  "run_20261105_091624_live_drag_plate": {
+   "mse": 0.2774478716157927,
+   "bias": 0.32698316484596535,
+   "mse_all": 0.293612089991509,
+   "n": 321,
+   "mse_below_2": 0.4347649096204857
+  }
+ },
+ "created": "2026-11-05T09:56:56Z",
+ "name": "default_20261104",
+ "label": "Default 4 Nov (saved copy): k 145.1, zero from tare, Butterworth 0.75 Hz"
+}

@@ -1,0 +1,130 @@
+{
+ "model": "sqrt",
+ "method": "METHOD_DRAG_PLATE",
+ "params": {
+  "sqrt_k": 149.2,
+  "sqrt_x0": 0.02404,
+  "lc_n_per_count": 1e-05,
+  "filter_kind": 0.0,
+  "ema_alpha": 0.2,
+  "lpf_hz": 0.51,
+  "lead_tau": 0.0
+ },
+ "fit": {
+  "static": {
+   "sqrt_k": 149.2,
+   "sqrt_x0": 0.02404,
+   "zero": "fit",
+   "zero_note": "x0 is above the fan-off tare (USER button / TARE): below about 2 m/s the plate reads near 0, which the 2-10 m/s test does not score",
+   "k_range": [
+    148.40234656087927,
+    150.20252302834126
+   ],
+   "still_air_mps": 0.0
+  },
+  "scored_band_mps": [
+   2.0,
+   10.0
+  ],
+  "method": "Joint search (grid, then Nelder-Mead) over sqrt_k, sqrt_x0, the smoother and lead_tau, minimising the mean logger-scored MSE, on ground truth between 2 and 10 m/s only (the test range), of the three white-tunnel runs replayed through the firmware chain (calib/recal.py zero and pairing). Deliberately fitted to this tunnel's VDAS, including its ~0.45 s lag.",
+  "ema_alternative": {
+   "mean_mse": 0.059012521173655054,
+   "params": {
+    "sqrt_k": 151.30391839378967,
+    "sqrt_x0": 0.026962663145153765,
+    "lead_tau": 4.820955380428431e-07,
+    "filter_kind": 1.0,
+    "ema_alpha": 0.010494282109536283
+   }
+  },
+  "sources": [
+   "run_20261104_151708",
+   "run_20261104_152520",
+   "run_20261105_091624_live_drag_plate"
+  ]
+ },
+ "metrics_before": {
+  "run_20261104_151708": {
+   "mse": 0.07205781021459792,
+   "bias": 0.17842288570448672,
+   "mse_all": 0.0827751378690262,
+   "n": 543,
+   "mse_below_2": 0.06235092211931394
+  },
+  "run_20261104_152520": {
+   "mse": 0.13089082352116563,
+   "bias": 0.16707392858537765,
+   "mse_all": 0.1557392976587648,
+   "n": 351,
+   "mse_below_2": 0.6308718949813434
+  },
+  "run_20261105_091624_live_drag_plate": {
+   "mse": 0.2774478716157927,
+   "bias": 0.32698316484596535,
+   "mse_all": 0.293612089991509,
+   "n": 321,
+   "mse_below_2": 0.4347649096204857
+  }
+ },
+ "metrics_after": {
+  "run_20261104_151708": {
+   "mse": 0.031772026279845156,
+   "bias": -0.06413059403080529,
+   "mse_all": 0.06154668456854239,
+   "n": 543,
+   "mse_below_2": 0.29102357369803933
+  },
+  "run_20261104_152520": {
+   "mse": 0.04680514242842028,
+   "bias": -0.04205261112538222,
+   "mse_all": 0.09384697448486995,
+   "n": 351,
+   "mse_below_2": 0.6788758366587078
+  },
+  "run_20261105_091624_live_drag_plate": {
+   "mse": 0.09591881904884594,
+   "bias": 0.13576586532277335,
+   "mse_all": 0.16913056951607736,
+   "n": 321,
+   "mse_below_2": 0.4536478549066953
+  }
+ },
+ "metrics_holdout": {
+  "run_20261104_151708": {
+   "mse": 0.04540393493741256,
+   "default_mse": 0.07205781021459792,
+   "params": {
+    "sqrt_k": 150.20252302834126,
+    "sqrt_x0": 0.028444154459032905,
+    "lead_tau": 1.3925256193541856e-07,
+    "filter_kind": 0.0,
+    "lpf_hz": 0.5023546178839433
+   }
+  },
+  "run_20261104_152520": {
+   "mse": 0.05250708338587035,
+   "default_mse": 0.13089082352116563,
+   "params": {
+    "sqrt_k": 149.39308585895827,
+    "sqrt_x0": 0.026366571301239466,
+    "lead_tau": 2.540116178644976e-05,
+    "filter_kind": 0.0,
+    "lpf_hz": 0.5240561253134203
+   }
+  },
+  "run_20261105_091624_live_drag_plate": {
+   "mse": 0.12180110010280656,
+   "default_mse": 0.2774478716157927,
+   "params": {
+    "sqrt_k": 148.40234656087927,
+    "sqrt_x0": 0.018398745850025273,
+    "lead_tau": 4.266856051566658e-08,
+    "filter_kind": 0.0,
+    "lpf_hz": 0.5054399876478869
+   }
+  }
+ },
+ "created": "2026-11-05T09:52:06Z",
+ "name": "new_calibration_20261105",
+ "label": "NEW calibration: fitted to the 4-5 Nov white-tunnel runs, 2-10 m/s (Butterworth 0.51 Hz), not flashed"
+}
