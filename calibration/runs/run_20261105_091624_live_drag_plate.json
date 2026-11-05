@@ -1,0 +1,116 @@
+{
+ "meta": {
+  "started": "2026-11-05T09:16:24+00:00",
+  "stopped": "2026-11-05T09:18:19+00:00",
+  "fs": 200.0,
+  "warmup_s": 0.5,
+  "label": "live_drag_plate",
+  "csv": "run_20261105_091624_live_drag_plate.csv",
+  "t0": 778433.960457333,
+  "mode": "live",
+  "method": "drag_plate",
+  "port_sensor": "/dev/cu.usbmodem1103",
+  "port_gt": "/Users/harrishayyanar/Documents/sensors/calibration/calib/vdas_gt.py:read_pa",
+  "profile": null,
+  "model": "sqrt",
+  "rows": 22976
+ },
+ "param_sets": [
+  {
+   "pset": 0,
+   "t_start": 778433.960457333,
+   "t_end": 778548.839336208,
+   "params": {
+    "sqrt_k": 145.1,
+    "sqrt_x0": 0.0,
+    "lc_offset": 0.0,
+    "lc_n_per_count": 1e-05,
+    "filter_kind": 0.0,
+    "ema_alpha": 0.2,
+    "lpf_hz": 0.75,
+    "lead_tau": 0.0,
+    "rho_ref": 1.204,
+    "temp_source": 0.0,
+    "mcp9808_offset": 0.0,
+    "sht40_offset": 0.0,
+    "stts22h_offset": 0.0,
+    "lps22df_offset": 0.0,
+    "tmp36_offset": 0.0,
+    "lm35_offset": 0.0,
+    "pressure_ref_pa": 101325.0
+   }
+  }
+ ],
+ "events": [
+  {
+   "t": 778433.960457333,
+   "rel_s": 0.0,
+   "kind": "start",
+   "name": null,
+   "from": null,
+   "to": null,
+   "detail": null
+  },
+  {
+   "t": 778548.839336208,
+   "rel_s": 114.87887887493707,
+   "kind": "stop",
+   "name": null,
+   "from": null,
+   "to": null,
+   "detail": null
+  }
+ ],
+ "segments": [
+  {
+   "pset": 0,
+   "t_start": 778433.960457333,
+   "t_end": 778548.839336208,
+   "duration_s": 114.87887887493707,
+   "n": 22976,
+   "n_scored": 22876,
+   "changed": [],
+   "metrics_pc": {
+    "n": 22836,
+    "mse": 0.23464480998929613,
+    "rmse": 0.4844014966835839,
+    "bias": 0.015006783360695435,
+    "sigma": 0.48416898541982345,
+    "mae": 0.4016766645660338,
+    "max_abs": 1.372068970409523,
+    "r2": 0.9793650903406469,
+    "lag_ms": -110.20453706942256
+   },
+   "metrics_board": {
+    "n": 22836,
+    "mse": 0.23463442568840548,
+    "rmse": 0.4843907778729953,
+    "bias": 0.014630271450241641,
+    "sigma": 0.48416978514328807,
+    "mae": 0.40167521068790984,
+    "max_abs": 1.3722247885419119,
+    "r2": 0.9793660035469128,
+    "lag_ms": -100.44070246611037
+   }
+  }
+ ],
+ "summary": {
+  "segments": 1,
+  "pc": {
+   "n": 22876,
+   "mse": 0.23464480998929613,
+   "rmse": 0.4844014966835839,
+   "bias": 0.015006783360695435,
+   "best_pset": 0,
+   "best_mse": 0.23464480998929613
+  },
+  "board": {
+   "n": 22876,
+   "mse": 0.23463442568840548,
+   "rmse": 0.4843907778729953,
+   "bias": 0.014630271450241641,
+   "best_pset": 0,
+   "best_mse": 0.23463442568840548
+  }
+ }
+}
