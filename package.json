@@ -13,6 +13,9 @@
     "dev:sim": "node scripts/bench.mjs sim",
     "check:wiring": "node scripts/check-wiring.mjs",
     "test": "node scripts/bench.mjs test",
-    "logger": "node scripts/bench.mjs logger"
+    "logger": "node scripts/bench.mjs logger",
+    "flash": "node scripts/bench.mjs flash",
+    "flash:default": "node scripts/bench.mjs flash default_20261104",
+    "flash:new": "node scripts/bench.mjs flash new_calibration_20261105"
   }
 }

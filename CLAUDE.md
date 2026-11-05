@@ -13,7 +13,15 @@ pnpm test         # calibration tests + wiring circuit check (pnpm check:wiring 
 pnpm logger       # the course's Wind Tunnel Logger (assessed tunnel runs), saving to data/tunnel/; runs beside pnpm dev
 pnpm dev --gt-giga   # the wood tunnel's GIGA pitot tube as ground truth instead; --no-gt for none
 cd firmware && pio run -e airspeed_drag_plate -t upload   # flash the competition build
+pnpm flash:new       # flash the 5 Nov tunnel fit (new_calibration_20261105), then read the board back and check it
+pnpm flash:default   # flash the saved 4 Nov default (default_20261104) back, and check it
+pnpm flash <profile> # any profile with an airspeed_drag_plate_<profile> env; pnpm flash alone lists them
 ```
+
+`pnpm flash` uploads over the ST-LINK (no dashboard, no serial port needed) and then runs `calib board-check`, which
+reads the board's values over its serial port and compares them with `calibration/profiles/<profile>.json`. It
+skips the read-back, and says so, if another program (a dashboard, the logger) has the port open. Every profile build
+is the competition firmware with the USER-button tare; a flashed calibration survives RESET and power-off.
 
 `pnpm` only starts the Python server (`scripts/bench.mjs`); there is no JavaScript build. `BENCH_PORT=/dev/…`
 picks the port; extra args go to `calib serve`. The board is never replaced by the simulator silently: no board

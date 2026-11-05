@@ -7,6 +7,9 @@
 //   pnpm dev:sim             dashboard on the simulator (every reading synthetic, and labelled as such)
 //   pnpm test                calibration tests
 //   pnpm logger              the course's Wind Tunnel Logger (tools/wind-tunnel-logger), runs saved in data/tunnel/
+//   pnpm flash <profile>     flash a calibration profile's build (env airspeed_drag_plate_<profile>), then read the
+//                            board back and check it runs that profile. pnpm flash:default / pnpm flash:new are the
+//                            saved 4 Nov default and the 5 Nov tunnel fit; pnpm flash alone lists the profiles
 //
 // Extra arguments go straight to `python -m calib serve`, e.g. pnpm dev:board --gt-cmd "python3 gt.py".
 //
@@ -147,6 +150,24 @@ async function serve(board, extra) {
   }
 }
 
+// Flash a calibration profile's firmware build and check the board took it. Every profile build is the competition
+// firmware (the USER-button tare included) with that profile's numbers; the build is cached, so a flash takes seconds.
+async function flash(profile) {
+  ensurePython();
+  const FW = join(ROOT, 'firmware');
+  const envs = [...readFileSync(join(FW, 'platformio.ini'), 'utf8').matchAll(/^\[env:airspeed_drag_plate_(\w+)\]/gm)].map((m) => m[1]);
+  if (!profile || !envs.includes(profile)) {
+    if (profile) say(`no firmware build for profile "${profile}"`);
+    fail(`pnpm flash <profile>, one of: ${envs.join(', ')}\n       (pnpm flash:default = default_20261104, pnpm flash:new = new_calibration_20261105)`);
+  }
+  const PIO = join(VENV, WIN ? 'Scripts/pio.exe' : 'bin/pio');
+  if (!existsSync(PIO)) fail(`PlatformIO not found at ${PIO}: ${PY} -m pip install platformio`);
+  say(`flashing airspeed_drag_plate_${profile} (the flashed calibration stays until the next flash; reset keeps it)`);
+  run(PIO, ['run', '-e', `airspeed_drag_plate_${profile}`, '-t', 'upload'], { cwd: FW });
+  say('reading the board back');
+  run(PY, ['-m', 'calib', 'board-check', profile, ...(process.env.BENCH_PORT ? ['--port', process.env.BENCH_PORT] : [])], { cwd: CAL });
+}
+
 const [cmd = 'dev', ...rest] = process.argv.slice(2);
 const extra = rest[0] === '--' ? rest.slice(1) : rest;
 if (cmd === 'dev' || cmd === 'board') await serve(true, extra);
@@ -161,4 +182,6 @@ else if (cmd === 'test') {
   ensureRequirements(join(LOGGER, 'requirements.txt'), join(VENV, '.logger-requirements'), 'Wind Tunnel Logger requirements');
   say('runs are saved in data/tunnel/. With pnpm dev running, pick the port "Board via the dashboard"; on the white tunnel start it as pnpm dev --no-gt so the logger can open the VDAS box. Otherwise pick the board itself.');
   run(PY, [join(LOGGER, 'run.py'), ...extra], { cwd: ROOT });
-} else fail(`unknown command ${cmd}: use dev, board, sim, test or logger`);
+} else if (cmd === 'flash') {
+  await flash(extra[0]);
+} else fail(`unknown command ${cmd}: use dev, board, sim, test, logger or flash`);

@@ -346,6 +346,93 @@ def cmd_get(a):
     print(f"saved {out}")
 
 
+def _find_profile(name: str) -> dict:
+    from . import tunnel_fit
+    profiles = tunnel_fit.all_profiles()
+    for p in profiles:
+        if p["name"] == name:
+            return p
+    raise SystemExit(f"no calibration profile {name!r}; saved: {', '.join(p['name'] for p in profiles)}")
+
+
+def profile_mismatches(params: dict, board: dict) -> list[tuple[str, float, float | None, bool]]:
+    """(name, profile value, board value, same?) for every airspeed setting the profile sets. Only the smoother
+    the profile uses is compared (the other one's value does nothing). Tolerant of the board's float32."""
+    active = "ema_alpha" if models.filter_kind_of(params) == models.FILTER_EMA else "lpf_hz"
+    keys = ["sqrt_k", "sqrt_x0", "lc_n_per_count", "filter_kind", active, "lead_tau"]
+    rows = []
+    for k in keys:
+        want, got = float(params[k]), board.get(k)
+        same = isinstance(got, (int, float)) and abs(float(got) - want) <= 1e-7 + 1e-5 * abs(want)
+        rows.append((k, want, float(got) if isinstance(got, (int, float)) else None, same))
+    return rows
+
+
+def _port_holders(port: str) -> list[str]:
+    """Other programs that have the serial port open (lsof), e.g. a dashboard or the Wind Tunnel Logger. Two
+    readers split the bytes, so the check never reads a port someone else holds. [] where lsof is missing."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("lsof"):
+        return []
+    out = subprocess.run(["lsof", "-F", "pc", port], capture_output=True, text=True).stdout.split("\n")
+    pids, names = [x[1:] for x in out if x.startswith("p")], [x[1:] for x in out if x.startswith("c")]
+    return [f"{n} (pid {p})" for p, n in zip(pids, names)]
+
+
+def _cal_via_serial(port: str, baud: int, wait_s: float) -> tuple[dict, str]:
+    cal: dict = {}
+    end = time.monotonic() + wait_s
+    while True:
+        try:
+            src = _open_board(port, baud, debug_mode=False, on_cal=cal.update)
+        except SystemExit:
+            if time.monotonic() > end:
+                raise
+            time.sleep(1.0)
+            continue
+        try:
+            while not cal and time.monotonic() < end:
+                src.send_command("GET")
+                time.sleep(1.5)
+        finally:
+            src.stop()
+        if cal:
+            return cal, port
+        raise SystemExit(f"no #cal reply from {port} in {wait_s:.0f} s: is the airspeed firmware flashed?")
+
+
+def cmd_board_check(a):
+    """Does the board run this profile? GET over the board's own serial port (only when no other program has it)."""
+    from .sources import find_nucleo_port
+
+    prof = _find_profile(a.profile)
+    port = a.port
+    end = time.monotonic() + a.wait
+    while not port:  # just flashed: the ST-LINK's serial port can take a moment to come back
+        port = find_nucleo_port()
+        if not port:
+            if time.monotonic() > end:
+                raise SystemExit("no Nucleo found on USB")
+            time.sleep(0.5)
+    holders = _port_holders(port)
+    if holders:
+        raise SystemExit(f"not reading {port}: {', '.join(holders)} has it open, and two readers would corrupt "
+                         f"each other's data. Close it, then run: python -m calib board-check {prof['name']}")
+    cal, via = _cal_via_serial(port, a.baud, a.wait)
+    rows = profile_mismatches(prof["params"], cal)
+    print(f"board (via {via}): build {cal.get('build', '?')}, method {cal.get('method', '?')}")
+    print(f"profile {prof['name']}: {prof['label']}")
+    for k, want, have, same in rows:
+        print(f"  {k:<15} profile {want:<12.7g} board {('-' if have is None else f'{have:.7g}'):<12} {'ok' if same else 'DIFFERENT'}")
+    bad = [r[0] for r in rows if not r[3]]
+    if bad:
+        raise SystemExit(f"the board is NOT on {prof['name']}: {', '.join(bad)} differ. A SET changes RAM until "
+                         "the next reset; press the black RESET button, or flash the profile.")
+    print(f"OK: the board runs {prof['name']}. Zero it with the blue USER button (fan off) before each run.")
+
+
 def cmd_push(a):
     rec = export.load(a.json)
     lines = export.push_lines({**models.default_params(), **rec["params"]})
@@ -609,6 +696,13 @@ def main(argv=None):
     p = sub.add_parser("get", help="save the board's live calibration (GET) as JSON: calibration file on demand")
     p.add_argument("--port", required=True); p.add_argument("--baud", type=int, default=115200)
     p.add_argument("-o", "--out"); p.set_defaults(fn=cmd_get)
+
+    p = sub.add_parser("board-check", help="does the board run this calibration profile? (exit 1 if not)")
+    p.add_argument("profile", help="profile name, e.g. default_20261104 or new_calibration_20261105")
+    p.add_argument("--port", help="the Nucleo's serial port (default: found by its ST-LINK USB id)")
+    p.add_argument("--baud", type=int, default=115200)
+    p.add_argument("--wait", type=float, default=15.0, help="seconds to wait for the board to answer")
+    p.set_defaults(fn=cmd_board_check)
 
     p = sub.add_parser("push", help="send a calibration JSON to the board with SET")
     p.add_argument("json"); p.add_argument("--port", required=True); p.add_argument("--baud", type=int, default=115200)
