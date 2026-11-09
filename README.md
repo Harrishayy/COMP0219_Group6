@@ -42,7 +42,7 @@ You need Python 3.10+, Node 18+ with pnpm (`corepack enable` gives you pnpm), an
 board (`pip install platformio`, or the VS Code extension).
 
 ```bash
-git clone <this repo> && cd sensors
+git clone https://github.com/Harrishayy/COMP0219_Group6.git && cd COMP0219_Group6
 pnpm dev            # calibration dashboard on the Nucleo, opens http://localhost:8765
 ```
 
@@ -75,9 +75,6 @@ MCP9808 and LM35 tabs have **Wiring** (a breadboard drawing to build step by ste
 **Datasheet** (the PDF, with jumps to the useful pages) sub-tabs. Check the
 200 Hz requirement with `python host/check_stream.py -d 30 --debug` (stop the dashboard first: it holds the
 port). On macOS/Linux the ST-LINK port is auto-detected; pass `--port COM5` (or similar) otherwise.
-
-Working on the code with Claude: `CLAUDE.md` maps every directory and has recipes for the common changes;
-`calibration/app/static/CLAUDE.md` covers the dashboard UI.
 
 ## Firmware
 

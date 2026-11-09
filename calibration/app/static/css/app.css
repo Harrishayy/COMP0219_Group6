@@ -1,6 +1,6 @@
 /* Components and layout. Every value comes from tokens.css; no colour, face or size is written here.
    Every sensor tab is rendered by js/core/sensor-page.js with these classes, so a new sensor gets the same
-   layout without new CSS. The catalogue (class, states, where used) is in app/static/CLAUDE.md. */
+   layout without new CSS. */
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--appbar-h) + var(--sp-4)); }

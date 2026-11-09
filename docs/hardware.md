@@ -74,6 +74,9 @@ behind a sensor hub.
 - **NAU7802 + 5 kg load cell**: 320 SPS at gain 128. With 3.3 V excitation, 5 kg full scale is only a
   few mV, and drag forces at 2 m/s are millinewtons. Mechanical lever ratio and tare discipline matter
   more than electronics here.
+- **Qwiic Scale wiring photos**: [front, with terminal connections](images/qwiic-scale-front.jpg) and
+  [back, with the printed pin labels](images/qwiic-scale-back.jpg). Check the board's silkscreen before wiring;
+  the photos show the colour order but do not replace an electrical check.
 - **Bourns EM14 encoder**: specified for a 5 V supply. Check that the outputs are within the F411's input
   limits before connecting them to PA0/PA1. Use a resistor divider or level shifter if the outputs swing
   to 5 V. Set `kEncoderCountsPerRev` to 4 × the cycles/rev of your part.

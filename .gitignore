@@ -6,6 +6,10 @@ firmware/.pio/
 .vscode/launch.json
 .vscode/ipch
 
+# pnpm scripts have no JavaScript dependencies; pnpm may still create these files.
+node_modules/
+pnpm-lock.yaml
+
 # Python
 __pycache__/
 *.pyc

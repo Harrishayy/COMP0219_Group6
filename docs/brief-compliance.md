@@ -71,7 +71,7 @@ Demo and submission dates: to be announced.
 | R4/R5 200 Hz, 115200 | Pass | USART2 is the ST-LINK virtual COM port; NAU7802 at 320 SPS is faster than 200 Hz |
 | R6 envelope and plate | Likely pass | About 19 cm tall (15 cm mast + target radius). The baseplate must bolt to the 30 cm plate |
 | R7 safety | Pass | No rotating parts or magnets. Sand the cut ends of the carbon tube and the acrylic/MDF edges |
-| Hardware list | **Check** | The brief supplies a **5 kg** cell. The memo uses a **1 kg** cell, and "Innovation Lab passive/consumable parts" doesn't clearly cover one. Confirm with staff |
+| Hardware list | **Check** | The brief supplies a **5 kg** cell. This concept assumes a **1 kg** cell, and "Innovation Lab passive/consumable parts" doesn't clearly cover one. Confirm with staff |
 
 ### Corrections needed before this goes in the report
 
@@ -83,7 +83,8 @@ Demo and submission dates: to be announced.
   its purpose.
 - [ ] **A sphere still sheds vortices.** At Re ≈ 8,000–55,000 the wake is unsteady, though less periodic than
   behind a flat plate. Say "weaker, less coherent shedding", not "entirely eliminating".
-- [ ] **The memo's formulas are garbled.** Write ρ = p / (R_specific · T) and v = √(2F / (ρ · C_D · A)).
+- [ ] **Use the implemented equations in the report.** See `docs/formulas.md` for humid-air density and
+  v = √(2F / (ρ · C_D · A)).
 - [ ] **The mast drags too.** An 8 mm × 15 cm tube makes about 0.09 N at 10 m/s, roughly as much as a 70 mm
   sphere. Calibration absorbs it, but it weights the reading by the velocity profile along the mast. Fixes:
   a thinner mast, or a **fixed shroud** (a stationary tube around the mast, on the baseplate, not touching it).

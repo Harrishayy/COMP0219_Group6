@@ -59,8 +59,6 @@ The dashboard is plain ES modules in `app/static/` (no build step). A sensor is 
 `app/static/js/sensors/`: copy `_template.js`, fill it in and add one line to `js/sensors/index.js` (the contract is
 documented there); it gets its own tab with the shared layout and no new CSS. All colours, fonts and spacing are
 tokens in `css/tokens.css` (direction "Notebook"; fonts bundled in `fonts/` so it works offline).
-`app/static/CLAUDE.md` has the map of files, the rules and the component catalogue, so changes made with Claude stay
-consistent.
 
 The same work without the dashboard:
 
