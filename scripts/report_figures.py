@@ -14,8 +14,8 @@ Steps (each can also be run on its own):
                             error analysis)
 
 Fig. 5 panels
-  (a) Welch PSD of the unfiltered stream (4 Nov firmware, no output low-pass) on
-      steady plateaus, with the vortex-shedding band f = St v / D (St 0.12-0.2,
+  (a) Welch PSD of the output stream recorded with the 4 Nov firmware, before the
+      output low-pass was added, on steady plateaus, with the vortex-shedding band f = St v / D (St 0.12-0.2,
       D = target diameter) drawn for each speed.
   (b) At ~10 m/s: each assessed run's output PSD (solid) against the unfiltered
       PSD passed through that run's 2nd-order Butterworth low-pass (dashed).
@@ -32,6 +32,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pandas as pd
 from scipy import signal
 import matplotlib
 
@@ -148,6 +149,12 @@ def panel_c(cal1, r1, r2, n):
     for r, c, mk, lab in ((cal1, CC, "s", "check run"), (r1, C1, "o", "run 1"),
                           (r2, C2, "^", "run 2")):
         p = plateau_table(r)
+        if r is cal1:
+            # the check run's slow descent through 3-4 m/s (56-67 s) is not a strict
+            # plateau but is the only low-speed steady segment; include it
+            m = (r.tv > 56) & (r.tv < 67)
+            p = pd.concat([p, pd.DataFrame([dict(v=r.yv[m].mean(), bias=(r.ya[m] - r.yv[m]).mean(),
+                                                 t0=56.0, t1=67.0)])], ignore_index=True)
         sd = []
         for _, q in p.iterrows():
             m = (r.tv >= q.t0) & (r.tv <= q.t1)

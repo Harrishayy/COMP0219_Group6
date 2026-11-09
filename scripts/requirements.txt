@@ -1,0 +1,7 @@
+# Dependencies for scripts/report_figures.py (and analyse_team6.py, fig_demo_panels.py).
+# Report figures were produced with Python 3.14, NumPy 2.5, SciPy 1.18, Matplotlib 3.11;
+# also tested with Python 3.12, NumPy 2.5.4, SciPy 1.18.1, pandas 3.0.6, Matplotlib 3.11.2.
+numpy>=2.5,<3
+scipy>=1.18,<2
+pandas>=2.2
+matplotlib>=3.11,<4
