@@ -1,3 +1,4 @@
+
 # Contact-Based Airspeed Sensor (COMP0219, Stage 1)
 
 Embedded airspeed sensor for the UCL *Sensors & Signal Conditioning* project. A mechanical transducer
@@ -5,6 +6,8 @@ interacts with the flow in a mini wind tunnel, an STM32 **Nucleo-F411RE** estima
 **2–10 m/s** entirely on board, and streams it as one float per line at **200 Hz over 115200 baud**.
 The tunnel's Dwyer 616KD differential-pressure pitot provides ground truth. The brief is in
 [`docs/project-brief-part1.pdf`](docs/project-brief-part1.pdf).
+
+<img width="2365" height="1330" alt="449EC28C-89E9-4ED8-ADA8-D13CE9CB625E_1_102_o" src="https://github.com/user-attachments/assets/3ad81d89-04d9-4268-8d14-4f4530ca2899" />
 
 | Requirement (brief)                     | Where it is handled                                                      |
 | --------------------------------------- | ------------------------------------------------------------------------ |
