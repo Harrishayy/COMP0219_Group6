@@ -18,13 +18,13 @@ jobs:
             ~/.platformio/.cache
             ~/.platformio/packages
             ~/.platformio/platforms
-          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+          key: pio-${{ hashFiles('cw1/firmware/platformio.ini') }}
       - run: pip install platformio
       - name: Unit tests (lib/airmath, native)
-        run: pio test -d firmware -e native
+        run: pio test -d cw1/firmware -e native
       - name: Build every firmware env
         run: |
-          pio run -d firmware \
+          pio run -d cw1/firmware \
             -e airspeed -e airspeed_cup_hall -e airspeed_drag_plate \
             -e airspeed_drag_plate_giga_20261029 -e airspeed_drag_plate_giga_20261029_tared -e airspeed_drag_plate_uncalibrated \
             -e airspeed_drag_plate_default_20261104 -e airspeed_drag_plate_new_calibration_20261105 \
@@ -37,8 +37,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r host/requirements.txt
-      - run: pytest host -q
+      - run: pip install -r cw1/host/requirements.txt
+      - run: pytest cw1/host -q
 
   wiring:
     runs-on: ubuntu-latest
@@ -48,4 +48,4 @@ jobs:
         with:
           node-version: "20"
       - name: Wiring diagrams are valid circuits and match board_config.h
-        run: node scripts/check-wiring.mjs
+        run: node cw1/scripts/check-wiring.mjs
