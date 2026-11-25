@@ -1,0 +1,6 @@
+# On the Pi these come from apt, never pip (week 6 lab): sudo apt install python3-picamera2 python3-numpy python3-serial
+# then: python3 -m venv ~/comp0219 --system-site-packages
+# On a laptop (simulator and tests only):
+numpy>=1.24
+pyserial>=3.5
+pytest>=7

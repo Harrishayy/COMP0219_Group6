@@ -1,0 +1,19 @@
+# The sensor as a service, so it is started and stopped remotely and nothing else:
+#   sudo systemctl start aircam     (from a Raspberry Pi Connect remote shell, or SSH)
+#   sudo systemctl stop aircam
+# Install: sudo cp deploy/aircam.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# Not enabled at boot on purpose: the run starts when we say so. Paths assume the repo at ~/sensors and the
+# week 6 venv at ~/comp0219 (python3 -m venv ~/comp0219 --system-site-packages).
+[Unit]
+Description=COMP0219 camera airspeed sensor
+After=multi-user.target
+
+[Service]
+User=comp0219
+WorkingDirectory=/home/comp0219/sensors/cw2/pi
+ExecStart=/home/comp0219/comp0219/bin/python -m aircam run --config /home/comp0219/aircam.json --port /dev/ttyAMA0 --record /home/comp0219/aircam-runs
+Restart=on-failure
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target
