@@ -31,15 +31,15 @@ install_pi() {
     echo 'dtparam=uart0=on' | sudo tee -a "$boot" >/dev/null
     echo "   added dtparam=uart0=on to $boot: reboot once for /dev/ttyAMA0 to appear"
   fi
-  echo "== the aircam command and the aircam service"
-  mkdir -p "$HOME/.local/bin"
-  ln -sf "$HERE/aircam" "$HOME/.local/bin/aircam"
+  echo "== the aircam command (in /usr/local/bin, which every terminal searches) and the aircam service"
+  sudo ln -sf "$HERE/aircam" /usr/local/bin/aircam
+  [[ -L $HOME/.local/bin/aircam ]] && rm -f "$HOME/.local/bin/aircam"    # where an older install put it
   sed -e "s|@USER@|$USER|g" -e "s|@HOME@|$HOME|g" -e "s|@HERE@|$HERE|g" -e "s|@PY@|$PI_VENV/bin/python|g" \
     "$HERE/pi/deploy/aircam.service" | sudo tee /etc/systemd/system/aircam.service >/dev/null
   sudo systemctl daemon-reload
   [[ -f $HOME/aircam.json ]] || cp "$HERE/pi/config.example.json" "$HOME/aircam.json"
   "$PI_VENV/bin/python" -c "import picamera2, numpy, serial, cv2; print('picamera2 ok | numpy', numpy.__version__, '| opencv', cv2.__version__)"
-  echo "done. Open a new terminal (or: export PATH=\$HOME/.local/bin:\$PATH), then: aircam setup  (fan off)"
+  echo "done. Next: aircam setup  (fan off; works in this terminal and any other)"
 }
 
 install_laptop() {
