@@ -10,8 +10,8 @@ A ping pong ball hangs on a straw between two pillars. The Pi's camera watches i
 Code: `cw2/pi/aircam/`. Requirements: [`brief.md`](brief.md).
 
 ```
-camera frame (120 fps, Y plane)                                                         every 5 ms
-  │ mean shift in a window round the ball (features.py)                                   │
+camera frame (120 fps, colour)                                                          every 5 ms
+  │ OpenCV colour mask + moments in a window round the ball (features.py)                 │
   ▼                                                                                       ▼
 d = how far the ball is from rest, mm ──► Kalman (estimator.py) ──predict to tick──► v = k·√tan θ(d) ──► "5.123\n"
                                           gate outliers, upsample to 200 Hz            (models.py)       (stream.py)
@@ -19,32 +19,46 @@ d = how far the ball is from rest, mm ──► Kalman (estimator.py) ──pred
 
 ## 1. Reading: from a frame to how far the ball has moved
 
-**Detection** (`aircam real detect`, fan off) runs once per camera position, and is confirmed by eye before
-anything tracks.
-- **Finding the ball.** It takes 15 still colour frames and finds the ball as the biggest round blob that stands
-  out, either by brightness (a white ball on a dark background) or by colour (an orange ball on a pale one). It looks at several grey levels, because at a low level a light straw joins the ball into one long
-  shape.
+**Detection** (`aircam real detect`, fan off) runs once per camera position, with OpenCV, and is confirmed by eye
+before anything tracks.
+- **Circles.** `cv2.HoughCircles` (the `HOUGH_GRADIENT_ALT` method) on the blurred grey frame, at most 640 px wide,
+  finds round edges. It runs once, in ~10 ms.
+- **The check.** Each circle is kept only if it looks like a ball the tracker can follow. The ball's colour is
+  learnt from the inside of the circle, in HSV: by hue for an orange ball, by brightness for a white one. Then:
+  - the inside must differ from its surroundings (a ring or a washer does not);
+  - that colour must fill at least 75 % of the circle;
+  - at most 15 % of the ring around it may share that colour (a white ball on a white wall cannot be tracked);
+  - the colour blob must be centred on the circle.
+
+  The biggest circle that passes is the ball.
+- **Focus.** The ball's edge width is measured along 48 rays across its rim: ~1–2 px in focus, more when blurred.
+  It is shown on the image so the HQ camera's lens can be focused by eye (turn the ring, press N, watch the number).
+  A soft edge is a warning, not a refusal.
+- **What it shows.** The colour image with a pixel grid, the ball in green with its radius and focus, other
+  candidates in amber, and the circles it turned down in red, each with the reason.
+- **Confirming it.** Y saves. N takes fresh frames and tries again. A click (or a typed X,Y) takes the circle
+  there, or, if the circle finder missed a blurred ball, the one-coloured blob under the click. Q quits.
 - **What it measures:**
-  - the ball's colour and its background's;
+  - the ball's HSV colour range, and its colour and its background's (for reports);
   - the ball's radius in pixels. A ping pong ball is 40 mm, so the radius also gives the mm per pixel, and readings
     do not depend on how far away the camera is;
-  - the rest position, measured by the tracker itself, so the centroid's offset on a shaded ball is in the rest
-    position too.
-- **What it assumes about the scene:** only "a round thing that differs from what is around it".
-- **Confirming it.** You press Y on the circled image, click the ball, or type its position.
+  - the rest position, measured by the tracker itself over the still frames, and the ball's area in the mask at
+    rest.
 
-**Every frame** (`features.Ball`):
-- **Scoring each pixel.** Each pixel near the ball gets a "ballness" score: its colour projected onto the line from
-  the background's colour (0) to the ball's (1). For a white ball on black this is brightness; for an orange ball it
-  is colour.
-- **Locating the ball.** A shrinking mean shift from where the ball was last: the soft-thresholded centroid of that
-  score inside a disc of 2, then 1.5, then 1.25 radii.
-  - The disc keeps the straw, the pillars and glints out.
-  - The soft threshold (0 at a score of 0.5, 1 at 0.75) gives sub-pixel positions from the ball's edge.
-- **Cost.** It touches only a window around the ball, sub-sampled so the ball spans ~32 px. That is 0.05 ms a frame
-  on a laptop; budget a few times that on the Pi, against 8.3 ms at 120 fps.
-- **Lost frames.** If the ball's weight in the disc is not 0.5–1.5 × its weight at rest (occluded, a glint, a
-  half-drawn screen frame), a coarse search over the whole frame finds it again. That frame gives no reading.
+**Every frame** (`features.Ball`) uses the course lab's per-frame method (week 6, script 3.2) on a small window:
+- **Locating the ball.** A window of 2.6 radii square, round where the ball was: `cv2.cvtColor` to HSV,
+  `cv2.inRange` with the ball's colour, a disc of 1.3 radii (which keeps the straw, the pillars and glints out),
+  then `cv2.moments` for the centroid. It re-centres up to four times, so it keeps up with a fast swing.
+- **Cost.** 0.03 ms a frame on a laptop with a 40 px ball in a 1332×990 frame. On the Pi 5, the lab measured the
+  same colour method at 8–9 ms for a whole 1332×990 frame (week 6 README, §3.2). The window round a 40 px ball is
+  about 105×105 px, under 1 % of the frame, so each pass is ~0.07 ms there and a frame (one to four passes) well
+  under 0.5 ms, against 8.3 ms at 120 fps. `aircam real check` measures it.
+- **Lost frames.** If the ball's area in the disc is not 0.5–1.5 × its area at rest (occluded, a glint, a
+  half-drawn screen frame), the whole frame is searched at quarter size for a round blob of its colour and size.
+  That frame gives no reading.
+- **Why not a trained detector.** A neural network (YOLO's "sports ball", for example) would need PyTorch on the Pi
+  and runs at roughly 10 frames a second at best on its CPU, against 120 here. It also gives a box, not a sub-pixel centre.
+  The scene is fixed and the object known, so a colour mask on a window is both faster and more precise.
 
 **The reading** is the chord d, the distance from the rest position in mm.
 - It needs neither the hinge's position in the image nor a level camera.
@@ -52,7 +66,8 @@ anything tracks.
   alone would grow at 0.57.
 
 **Accuracy.**
-- Synthetic frames with a straw and pillars: within ±0.6 px of the true chord across 2–50° (`test_core.py`).
+- Synthetic frames with a straw and pillars: within ±0.6 px of the true chord across 2–50° (`test_core.py`); a
+  shaded orange ball at the Pi's frame size: within 0.03 mm across 1–50°.
 - Frames drawn by the screen simulator and filmed by the camera model: the tracker's chord is one fixed scale times
   the true chord, to within 1 %.
 

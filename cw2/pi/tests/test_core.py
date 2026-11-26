@@ -181,12 +181,33 @@ def test_ticker_keeps_schedule_catches_up_and_gives_up_after_a_stall():
 
 
 # -- the ball -------------------------------------------------------------------------------------------------
-def test_otsu_and_label():
-    assert 50 < features.otsu(np.r_[np.full(100, 20), np.full(100, 200)]) < 200
-    m = np.zeros((20, 20), bool)
-    m[2:5, 2:5] = m[10:18, 3] = m[10, 3:15] = True       # a square and an L
-    lab = features.label(m)
-    assert len(np.unique(lab[lab > 0])) == 2 and lab[17, 3] == lab[10, 14]
+def test_a_round_thing_that_is_not_a_ball_is_turned_down_with_a_reason():
+    """A ring (a washer, the end of a tube) has a round edge, so the circle finder sees it; its colour does not
+    fill it, so it is not taken for the ball, and the screen says why."""
+    cv2 = pytest.importorskip("cv2")
+    img = np.full((H, W, 3), 30, np.uint8)
+    cv2.circle(img, (200, 200), 30, (230, 230, 230), 4, cv2.LINE_AA)
+    found = features.detect(img)
+    assert found and not found[0].ok and "ring" in found[0].why
+    assert features.find_ball(img) is None
+
+
+def test_focus_reading_says_when_the_ball_is_blurred():
+    cv2 = pytest.importorskip("cv2")
+    sharp = np.repeat(scene(*at(0))[..., None], 3, axis=2)
+    c = features.detect(sharp)[0]
+    assert c.ok and c.sharp and c.edge_px < 3
+    soft = features.detect(cv2.GaussianBlur(sharp, (0, 0), 4))[0]
+    assert soft.ok and not soft.sharp and soft.edge_px > 2 * c.edge_px
+
+
+def test_a_click_finds_a_ball_too_blurred_for_the_circle_finder():
+    cv2 = pytest.importorskip("cv2")
+    x, y = at(0)
+    blurred = cv2.GaussianBlur(np.repeat(scene(x, y)[..., None], 3, axis=2), (0, 0), 8)
+    assert features.find_ball(blurred) is None                       # no clean round edge left
+    c = features.detect(blurred, near=(x + 5, y - 3))[0]             # but clicked on
+    assert c.ok and math.hypot(c.x - x, c.y - y) < 2.0 and not c.sharp
 
 
 def test_setup_finds_the_ball_not_the_pillars_or_the_straw():
@@ -218,11 +239,9 @@ def test_colour_finds_and_tracks_an_orange_ball_on_a_pale_wall():
 
 
 def _tracker():
-    x, y = at(0)
-    img = scene(x, y)
-    fx, fy, r = features.find_ball(img)
-    fg, bg = features.levels(img, fx, fy, r)
-    return features.Ball(rest=(fx, fy), radius=r, fg=fg, bg=bg), r
+    c = features.detect(scene(*at(0)))[0]
+    assert c.ok
+    return c.ball, c.r
 
 
 def test_ball_distance_from_rest_is_sub_pixel_across_the_swing():
@@ -332,6 +351,9 @@ def test_example_config_builds_once_setup_has_found_the_ball():
     cfg = app.load(PI / "config.example.json")
     assert cfg["ball"] is None
     cfg["ball"] = {"rest": [320, 280], "radius_px": 19, "fg": [220, 220, 220], "bg": [30, 30, 30], "confirmed": True}
+    with pytest.raises(SystemExit, match="run detect again"):     # a file from before the OpenCV detection
+        app.build(cfg)
+    cfg["ball"].update(hsv_lo=[0, 0, 120], hsv_hi=[179, 60, 255], area_px=1100)
     model, ball, est = app.build(cfg)
     assert isinstance(ball, features.Ball) and isinstance(est, estimator.Kalman)
     assert model.speed(model.reading(6.0)) == pytest.approx(6.0)

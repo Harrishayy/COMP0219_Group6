@@ -28,14 +28,16 @@ aircam real view        # 2. watch it track: the live colour feed with the detec
 aircam real run         # 3. stream to the laptop's Wind Tunnel Logger; prints the speed once a second
 ```
 
-1. **Detect.** It shows the camera image with a green circle on what it thinks is the ball. It stays open until you
-   are happy:
+1. **Detect.** OpenCV finds round edges (`HoughCircles`), then keeps only those filled by one colour that their
+   surroundings do not have. The image shows the ball in green with a focus reading, other candidates in amber,
+   and what it turned down in red, with the reason. If the focus reading says soft, turn the lens's focus ring and
+   press N until the number is smallest. It stays open until you are happy:
 
    | Key | Does |
    | --- | --- |
    | **Y** | Saves it |
    | **N** | Tries again with fresh frames. Move the ball, the camera or the light first if it was wrong |
-   | **Click** the ball | Looks for it there |
+   | **Click** the ball | Takes the circle there, or the blob of one colour under the click if it missed a blurred ball |
    | **Q** | Quits without saving |
 
    - On the Pi's desktop (or in Pi Connect screen sharing), these are keys and clicks in the window.

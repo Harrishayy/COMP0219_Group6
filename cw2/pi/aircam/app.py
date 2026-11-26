@@ -16,6 +16,7 @@ closes the port and the recording cleanly.
 from __future__ import annotations
 
 import json
+import math
 import signal
 import sys
 import threading
@@ -164,7 +165,8 @@ def detect(cfg: dict, config_path, near=None, web: bool = False, port: int = 808
     """Step 1, fan off: find the ball, show it in colour, save it once confirmed. Returns the updated config.
 
     The camera and the window stay open until you answer: N takes fresh frames and tries again (move the ball,
-    the camera or the light first), a click (or a typed X,Y) looks for the ball there, Y saves, Q quits."""
+    the camera or the light first, or turn the focus ring), a click (or a typed X,Y) looks for the ball there,
+    Y saves, Q quits."""
     target = cfg.get("target", "real")
     image = Path(config_path).expanduser().with_name(f"aircam-{target}-detect.png")
     cam = _camera(cfg)
@@ -174,14 +176,20 @@ def detect(cfg: dict, config_path, near=None, web: bool = False, port: int = 808
         it = cam.frames()
         frames = grab(it)
         while True:
-            b, still, jitter = features.setup(frames, near=near)
-            marks = [] if b is None else [(b.rest[0] + b.outline[0], b.rest[1] + b.outline[1], b.radius)]
-            path = features.save_image(image, still, marks)
+            still = np.median(np.stack(frames), axis=0).astype(np.uint8)
+            found = features.detect(still, near)
+            best = found[0] if found and found[0].ok else None
+            b, jitter = None, float("nan")
+            if best is not None:
+                b, _, jitter = features.settle(best.ball, frames, best)
+            shown = detect_image(still, found, b)
+            path = features.save_image(image, shown)
+            print(detect_text(found, b))
             if yes:
                 if b is None:
                     raise SystemExit(f"no ball found; the camera's view is in {path}")
                 break
-            answer = asker.ask(still, b)
+            answer = asker.ask(shown, b is not None)
             if answer == "y" and b is not None:
                 break
             if answer == "q":
@@ -190,7 +198,7 @@ def detect(cfg: dict, config_path, near=None, web: bool = False, port: int = 808
                 print("trying again with fresh frames")
                 frames, near = grab(it), None
             elif isinstance(answer, tuple):
-                print(f"looking for the ball near ({answer[0]:.0f}, {answer[1]:.0f})")
+                print(f"looking for the ball at ({answer[0]:.0f}, {answer[1]:.0f})")
                 near = answer
     finally:
         cam.stop()
@@ -201,39 +209,66 @@ def detect(cfg: dict, config_path, near=None, web: bool = False, port: int = 808
     print(f"confirmed and saved in {config_path}: ball at ({b.rest[0]:.0f}, {b.rest[1]:.0f}) px, radius "
           f"{b.radius:.1f} px ({b.mm_per_px:.3f} mm/px), contrast {b.contrast:.0f}, still-air jitter "
           f"{jitter:.3f} mm; image {path}")
-    if max(np.atleast_1d(b.fg)) > 250:
+    if max(b.fg or (0,)) > 250:
         print(f"warning: the ball is saturated: lower the exposure (aircam {target} set exposure=1500), detect again")
-    if b.contrast < 40:
-        print("warning: the ball barely stands out: a darker or plainer background, or more light on the ball")
+    if not best.sharp:
+        print(f"warning: the ball's edge is soft ({best.edge_px:.1f} px): turn the lens's focus ring to make that "
+              "number smaller (N to measure again), or it will be noisier")
     if b.radius < 8:
         print("warning: the ball is small in the image: move the camera closer for finer positions")
     print(f"next: aircam {target} view   (watch it track), then run")
     return cfg
 
 
-def detect_image(still, b):
-    """The detection to confirm: the colour frame, a pixel grid every 100 px, and the ball circled (or, when
-    nothing was found, what to do)."""
+def detect_text(found, b) -> str:
+    """One line per circle considered, for the terminal."""
+    if not found:
+        return "no circles in the image: is the ball in view, lit, and in focus?"
+    out = []
+    for i, c in enumerate(found[:6]):
+        what = ("BALL" if (i == 0 and b is not None) else
+                "another candidate: click it if this is the ball" if c.ok else f"no: {c.why}")
+        focus = f", edge {c.edge_px:.1f} px ({'sharp' if c.sharp else 'soft'})" if math.isfinite(c.edge_px) else ""
+        out.append(f"  circle at ({c.x:.0f}, {c.y:.0f}) r {c.r:.0f} px{focus}: {what}")
+    return "\n".join(out)
+
+
+def detect_image(still, found, b):
+    """The detection to confirm: the colour frame, a pixel grid every 100 px, the ball circled green with its
+    focus reading, and the other circles it considered in red with why they were turned down."""
     import cv2
     img = still.copy() if still.ndim == 3 else cv2.cvtColor(still, cv2.COLOR_GRAY2BGR)
     h, w = img.shape[:2]
 
-    def label(text, at):
-        for colour, thick in (((0, 0, 0), 3), ((255, 255, 255), 1)):     # readable on light and dark
-            cv2.putText(img, text, at, cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, thick, cv2.LINE_AA)
+    def label(text, at, colour=(255, 255, 255), size=0.45):
+        for c, thick in (((0, 0, 0), 3), (colour, 1)):                    # readable on light and dark
+            cv2.putText(img, text, at, cv2.FONT_HERSHEY_SIMPLEX, size, c, thick, cv2.LINE_AA)
     for x in range(100, w, 100):
         cv2.line(img, (x, 0), (x, h), (90, 90, 90), 1)
         label(str(x), (x + 3, 15))
     for y in range(100, h, 100):
         cv2.line(img, (0, y), (w, y), (90, 90, 90), 1)
         label(str(y), (3, y - 3))
+    for i, c in enumerate(found[:6]):
+        ctr, r = (int(round(c.x)), int(round(c.y))), max(int(round(c.r)), 6)
+        if i == 0 and b is not None:
+            continue
+        colour = (0, 220, 255) if c.ok else (60, 60, 255)               # amber: could be it; red: turned down
+        cv2.circle(img, ctr, r, colour, 2 if c.ok else 1, cv2.LINE_AA)
+        label("another candidate: click it if this is the ball" if c.ok else c.why,
+              (ctr[0] - r, ctr[1] + r + 14), colour, 0.4)
     if b is not None:
-        c = (int(round(b.rest[0] + b.outline[0])), int(round(b.rest[1] + b.outline[1])))
-        cv2.circle(img, c, int(round(b.radius)), (0, 255, 0), 3, cv2.LINE_AA)
-        cv2.drawMarker(img, c, (0, 255, 0), cv2.MARKER_CROSS, 12, 2)
+        c = found[0]
+        ctr = (int(round(b.rest[0] + b.outline[0])), int(round(b.rest[1] + b.outline[1])))
+        cv2.circle(img, ctr, int(round(b.radius)), (0, 255, 0), 3, cv2.LINE_AA)
+        cv2.drawMarker(img, ctr, (0, 255, 0), cv2.MARKER_CROSS, 12, 2)
+        focus = "sharp" if c.sharp else "soft: turn the focus ring, N to remeasure"
+        label(f"ball  r {b.radius:.0f} px   edge {c.edge_px:.1f} px ({focus})",
+              (max(ctr[0] - int(b.radius), 5), max(ctr[1] - int(b.radius) - 10, 30)),
+              (0, 255, 0) if c.sharp else (0, 200, 255), 0.5)
         text = "Green circle on the ping pong ball?   Y = yes   N = try again   click = it is here   Q = quit"
     else:
-        text = "No ball found. Fix the view, then N = try again   click = it is here   Q = quit"
+        text = "No ball found (red: why not). Fix the view or focus, then N = try again   click = it is here   Q = quit"
     size = 0.6
     while size > 0.3 and cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, size, 1)[0][0] > w - 20:
         size -= 0.05
@@ -258,11 +293,11 @@ class Asker:
         self.scale = 1.0
         self.opened = False
 
-    def ask(self, still, b):
-        img = detect_image(still, b)
-        return self._window(img, b) if self.window else self._shell(img, b)
+    def ask(self, img, has_ball: bool):
+        """img: the drawn detection (detect_image)."""
+        return self._window(img, has_ball) if self.window else self._shell(img, has_ball)
 
-    def _window(self, img, b):
+    def _window(self, img, has_ball):
         import cv2
         self.scale = min(1.0, 1280 / img.shape[1])
         shown = cv2.resize(img, (int(img.shape[1] * self.scale), int(img.shape[0] * self.scale))) \
@@ -278,25 +313,25 @@ class Asker:
             k = cv2.waitKey(50) & 0xFF
             if self.clicked:
                 return self.clicked.pop()
-            if k in (ord("y"), ord("Y")) and b is not None:
+            if k in (ord("y"), ord("Y")) and has_ball:
                 return "y"
             if k in (ord("n"), ord("N"), ord("r"), ord("R")):
                 return "n"
             if k in (ord("q"), ord("Q"), 27):
                 return "q"
 
-    def _shell(self, img, b):
+    def _shell(self, img, has_ball):
         from . import view
         if self.server is None:
             self.server = view.Mjpeg(self.port_)
             print(f"look at the detection: open {self.server.url} in the laptop's browser")
         self.server.publish(img)
         question = ("Is the green circle on the ping pong ball? [y = yes / n = try again / X,Y = the ball is here "
-                    "/ q = quit]: " if b is not None else
+                    "/ q = quit]: " if has_ball else
                     "No ball found. Fix the view, then [n = try again / X,Y = the ball is here / q = quit]: ")
         while True:
             a = input(question).strip().lower()
-            if a in ("y", "yes") and b is not None:
+            if a in ("y", "yes") and has_ball:
                 return "y"
             if a in ("n", "no", "r"):
                 return "n"
@@ -306,7 +341,7 @@ class Asker:
                 x, y = (float(v) for v in a.split(","))
                 return (x, y)
             except ValueError:
-                print("answer " + ("y, " if b is not None else "") + "n, q, or the ball's pixel position as X,Y "
+                print("answer " + ("y, " if has_ball else "") + "n, q, or the ball's pixel position as X,Y "
                       "(the grid lines are every 100 px)")
 
     def close(self):
