@@ -53,6 +53,9 @@ def _camera(cfg):
 
 
 def _stop_on_signals(stop: threading.Event):
+    """Ctrl+C, systemctl stop and a closed shell tab set `stop`. Only the main thread can take signals."""
+    if threading.current_thread() is not threading.main_thread():
+        return {}
     return {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
 
 
@@ -202,47 +205,148 @@ def record(cfg: dict, seconds: float = 12.0):
     return np.array(ts), np.array(ds)
 
 
-def preview(cfg: dict, every: int = 4):
-    """Every frame tracked, every `every`-th shown at half size with the ball, its rest position and the speed."""
+def check(cfg: dict, seconds: float = 10.0, image=None) -> dict:
+    """Track every frame for `seconds`, without streaming, and report how well the ball is being followed."""
+    model, ball, _ = build(cfg)
+    cam = _camera(cfg)
+    ts, ds, cost, last = [], [], [], None
+    cam.start()
+    try:
+        t0 = None
+        for t, gray, md in cam.frames():
+            t0 = t if t0 is None else t0
+            if t - t0 > seconds:
+                break
+            c0 = time.perf_counter()
+            d = ball(gray, t)
+            cost.append(time.perf_counter() - c0)
+            ts.append(t)
+            ds.append(np.nan if d is None else d)
+            last = gray
+    finally:
+        cam.stop()
+    r = tracking_report(np.array(ts), np.array(ds), np.array(cost), model,
+                        float(cfg.get("camera", {}).get("fps", 120.0)))
+    if image is not None and last is not None:
+        marks = [(ball.rest[0], ball.rest[1], 3.0)] + ([(*ball.pos, ball.radius)] if np.isfinite(ds[-1]) else [])
+        r["image"] = features.save_image(image, np.ascontiguousarray(last), marks)
+    return r
+
+
+def tracking_report(t, d, cost, model, fps_set: float = 120.0) -> dict:
+    """Numbers that say how well the ball was tracked over a recording (t s, d mm or NaN, cost s per frame):
+    frame rate, frames with the ball, per-frame cost, where the ball sat, and the camera's own noise in mm and
+    in m/s. The noise is taken frame to frame (std of the differences / √2), so a ball that is swinging slowly
+    does not count as noise; with the fan off it is the floor the camera adds to every reading."""
+    ok = np.isfinite(d)
+    n = int(d.size)
+    r = {"frames": n, "fps": (n - 1) / (t[-1] - t[0]) if n > 1 and t[-1] > t[0] else 0.0,
+         "found": float(ok.mean()) if n else 0.0, "cost_ms": 1e3 * float(np.mean(cost)) if n else 0.0,
+         "cost_max_ms": 1e3 * float(np.max(cost)) if n else 0.0}
+    gaps = np.diff(np.flatnonzero(np.r_[True, ok, True])) - 1
+    r["longest_gap"] = int(gaps.max()) if gaps.size else n
+    if ok.sum() < 3:
+        return r
+    dd = d[ok]
+    step = np.diff(d)[np.isfinite(np.diff(d))]
+    r["d_mm"] = float(np.median(dd))
+    r["angle_deg"] = float(np.degrees(model.theta(r["d_mm"])))
+    r["v_mps"] = float(model.speed(r["d_mm"]))
+    r["swing_mm"] = float(np.std(dd))
+    # robust (median absolute deviation): a glint or a lost-and-found frame must not count as noise
+    mad = float(np.median(np.abs(step - np.median(step)))) if step.size > 2 else float("nan")
+    r["noise_mm"] = 1.4826 * mad / np.sqrt(2.0)
+    r["jumps"] = int(np.sum(np.abs(step) > max(10 * r["noise_mm"], 1.0)))
+    for v in (2.0, 6.0, 10.0):                 # what that noise is in m/s, per frame, at three speeds
+        r[f"noise_mps_at_{v:g}"] = r["noise_mm"] / float(model.dreading_dv(v))
+    r["fps_set"] = fps_set
+    return r
+
+
+def report_text(r: dict) -> str:
+    lines = [f"{r['frames']} frames at {r['fps']:.1f} fps; ball found in {100 * r['found']:.1f}% "
+             f"(longest gap {r['longest_gap']} frames); tracking {r['cost_ms']:.2f} ms a frame (max "
+             f"{r['cost_max_ms']:.2f}, budget {1e3 / r.get('fps_set', 120.0):.1f})"]
+    if "d_mm" not in r:
+        return "\n".join(lines + ["the ball was hardly ever found: run aircam setup (fan off), and check the image"])
+    lines.append(f"ball {r['d_mm']:.2f} mm from rest = {r['angle_deg']:.1f} deg = {r['v_mps']:.2f} m/s on the "
+                 f"current map; it moved {r['swing_mm']:.2f} mm (std) over the recording")
+    lines.append(f"camera noise {r['noise_mm']:.3f} mm per frame = {r['noise_mps_at_2']:.3f} m/s at 2 m/s, "
+                 f"{r['noise_mps_at_6']:.3f} at 6, {r['noise_mps_at_10']:.3f} at 10; {r['jumps']} sudden jumps")
+    tips = []
+    if r["found"] < 0.99:
+        tips.append("the ball was lost in some frames: more light or a darker background, or rerun aircam setup")
+    if r["fps"] < 0.95 * r.get("fps_set", 120.0):
+        tips.append("the camera is dropping frames: close any preview or other camera program")
+    if r["d_mm"] < 3 and r["swing_mm"] < 0.5 and r["d_mm"] > 0.3:
+        tips.append(f"in still air the ball reads {r['d_mm']:.2f} mm off its rest: rerun aircam setup")
+    if r["jumps"]:
+        tips.append("sudden jumps: a reflection or something bright near the ball; look at the image")
+    return "\n".join(lines + ["-> " + tip for tip in tips] + (["-> tracking looks healthy"] if not tips else []))
+
+
+def preview(cfg: dict, web: bool = False, port: int = 8080, udp: str | None = None, every: int = 4,
+            seconds: float | None = None):
+    """The live view (view.py): every frame tracked, every `every`-th drawn with what the tracker saw, in a window
+    on the Pi's desktop or, with web, in a browser on the laptop. udp=HOST[:PORT] also sends the speed to the
+    screen simulator, so its panel shows the truth next to it (one line per frame: watch with it, score with run)."""
     import os
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        raise SystemExit("preview needs the Pi's desktop: run it in a terminal on the Pi's screen or in Pi Connect "
-                         "screen sharing, not in the remote shell (there `aircam run` prints the speed instead)")
+    from . import view
+
+    if not web and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        raise SystemExit("no desktop here (a remote shell): use `aircam preview --web` and open the address it "
+                         "prints in the laptop's browser, or run preview in Pi Connect screen sharing")
     import cv2
 
     model, ball, est = build(cfg)
     cam = _camera(cfg)
+    overlay = view.Overlay(ball, model, fps=float(cfg.get("camera", {}).get("fps", 120.0)))
+    server = view.Mjpeg(port) if web else None
+    sink = stream.Sink(f"udp:{udp if ':' in udp else udp + ':5005'}") if udp else None
     stop = threading.Event()
     previous = _stop_on_signals(stop)
-    rx, ry = ball.rest
-    r = ball.radius
+    if server:
+        print(f"live view: open {server.url} in a browser on the laptop (same network); Ctrl+C stops", flush=True)
+    note = f"also sending to {udp}" if udp else ""
     cam.start()
-    i, n, t_fps, fps = 0, 0, time.monotonic(), 0.0
+    i, n, t_fps, fps, ms, t_header, t0 = 0, 0, time.monotonic(), 0.0, 0.0, 0.0, None
     try:
         for t, gray, md in cam.frames():
+            t0 = t if t0 is None else t0
+            searched = ball.pos
+            c0 = time.perf_counter()
             d = ball(gray, t)
+            ms = 0.9 * ms + 0.1 * (time.perf_counter() - c0) * 1e3
             est.update(t, d)
-            i, n = i + 1, n + 1
-            if i % every:
-                continue
             v = est.value(t)
+            overlay.add(t, searched, d, v)
+            if sink:
+                if t >= t_header:
+                    sink.write(stream.comment(k=float(model.k), arm=float(model.arm_mm)))
+                    t_header = t + 5.0
+                sink.write(stream.line(v))
+            i, n = i + 1, n + 1
             now = time.monotonic()
             if now - t_fps >= 1.0:
                 fps, t_fps, n = n / (now - t_fps), now, 0
-            img = cv2.cvtColor(np.ascontiguousarray(gray), cv2.COLOR_GRAY2BGR)
-            cv2.drawMarker(img, (int(rx), int(ry)), (255, 160, 0), cv2.MARKER_CROSS, int(2 * r), 2)
-            if d is not None:
-                x, y = ball.pos
-                cv2.circle(img, (int(x), int(y)), int(r), (0, 255, 0), 2)
-                cv2.line(img, (int(rx), int(ry)), (int(x), int(y)), (0, 255, 0), 1)
-            text = f"{v:5.2f} m/s   d {d if d is not None else float('nan'):6.2f} mm   {fps:3.0f} fps"
-            cv2.putText(img, text if d is not None else "ball lost   " + text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                        1.0, (0, 255, 255) if d is not None else (0, 0, 255), 2)
-            cv2.imshow("aircam preview (q quits)", cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2)))
-            if cv2.waitKey(1) & 0xFF == ord("q") or stop.is_set():
+            if stop.is_set() or (seconds is not None and t - t0 > seconds):
                 break
+            if i % every:
+                continue
+            img = overlay.draw(gray, fps, ms, note=note)
+            if server:
+                server.publish(img)
+            else:
+                cv2.imshow("aircam preview (q quits)", img)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
     finally:
         cam.stop()
-        cv2.destroyAllWindows()
+        if server:
+            server.close()
+        else:
+            cv2.destroyAllWindows()
+        if sink:
+            sink.close()
         for sig, handler in previous.items():
             signal.signal(sig, handler)

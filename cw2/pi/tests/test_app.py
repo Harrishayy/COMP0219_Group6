@@ -1,7 +1,9 @@
 """The runner and setup end to end, with a fake camera in place of Picamera2."""
 import csv
+from pathlib import Path
 import math
 import time
+import socket
 
 import numpy as np
 import pytest
@@ -112,3 +114,76 @@ def test_capture_cuts_the_row_padding_and_stamps_mid_exposure(monkeypatch):
     Picamera2.cameras = []                        # no camera plugged in: say so, not "list index out of range"
     with pytest.raises(SystemExit, match="no camera found"):
         Camera()
+
+
+def test_check_reports_how_well_the_ball_is_tracked(tmp_path, monkeypatch):
+    monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
+    cfg = dict(CFG)
+    FakeCamera.theta_deg = 0.0
+    app.setup(cfg, tmp_path / "aircam.json")
+    FakeCamera.theta_deg = 20.0
+    r = app.check(cfg, seconds=1.0, image=tmp_path / "check.png")
+    assert r["found"] == 1.0 and 100 < r["fps"] < 140 and r["noise_mm"] < 0.01
+    mm_per_px = 40.0 / (2 * cfg["ball"]["radius_px"])
+    assert r["d_mm"] == pytest.approx(2 * ARM_PX * math.sin(math.radians(10)) * mm_per_px, rel=0.01)
+    assert "tracking looks healthy" in app.report_text(r) and Path(r["image"]).exists()
+
+
+def test_report_flags_lost_frames_and_jumps():
+    t = np.arange(240) / 120
+    d = 30 + 0.05 * np.random.default_rng(0).standard_normal(240)
+    d[50:60] = np.nan                                   # ten frames without the ball
+    d[100] += 8.0                                       # a glint
+    r = app.tracking_report(t, d, np.full(240, 2e-4), models.Pendulum())
+    assert r["found"] == pytest.approx(230 / 240) and r["longest_gap"] == 10 and r["jumps"] == 2
+    assert r["noise_mm"] == pytest.approx(0.05, rel=0.3) and r["noise_mps_at_2"] > r["noise_mps_at_10"] * 0.5
+    text = app.report_text(r)
+    assert "lost in some frames" in text and "sudden jumps" in text
+
+
+def test_live_view_draws_the_tracking_and_serves_it_to_a_browser(tmp_path, monkeypatch):
+    """preview --web: the annotated feed reaches a browser as MJPEG, and --udp feeds the simulator."""
+    cv2 = pytest.importorskip("cv2")
+    import socket
+    import threading
+    import urllib.request
+    monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
+    cfg = dict(CFG)
+    FakeCamera.theta_deg = 0.0
+    app.setup(cfg, tmp_path / "aircam.json")
+    FakeCamera.theta_deg = 25.0
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.bind(("127.0.0.1", 0))
+    rx.settimeout(2.0)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    th = threading.Thread(target=app.preview, args=(cfg,),
+                          kwargs=dict(web=True, port=port, udp=f"127.0.0.1:{rx.getsockname()[1]}", seconds=2.5))
+    th.start()
+    time.sleep(1.0)
+    page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2).read()
+    assert b"/stream" in page
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/stream", timeout=2) as resp:
+        chunk = resp.read(200_000)
+    start = chunk.index(b"\xff\xd8")
+    jpg = np.frombuffer(chunk[start:chunk.index(b"\xff\xd9", start) + 2], np.uint8)
+    img = cv2.imdecode(jpg, cv2.IMREAD_COLOR)
+    assert img.shape[:2] == (240, 320)                               # half size
+    assert rx.recv(100).startswith(b"# aircam") and float(rx.recv(100)) > 2.0   # the simulator gets the speed
+    th.join(timeout=5)
+    assert not th.is_alive()
+
+
+def test_overlay_marks_a_lost_ball_in_red():
+    cv2 = pytest.importorskip("cv2")
+    from aircam import features, view
+    img = scene(*__import__("test_core").at(0))
+    ball, _, _ = features.setup([img])
+    ov = view.Overlay(ball, models.Pendulum())
+    ov.add(0.0, ball.pos, None, 0.0)
+    out = ov.draw(np.full_like(img, 30), fps=120.0, ms=0.1)
+    x, y = (int(c * 0.5) for c in ball.pos)
+    r = int(ball.radius * 0.5)
+    ring = out[y - r - 2:y + r + 3, x - r - 2:x + r + 3].reshape(-1, 3)
+    assert np.any((ring[:, 2] > 200) & (ring[:, 1] < 80))           # a red circle where the ball was

@@ -4,3 +4,4 @@ numpy>=1.24
 pyserial>=3.5
 pytest>=7
 pygame>=2.5
+opencv-python-headless>=4.6    # tests of the live view (the Pi has python3-opencv from apt)

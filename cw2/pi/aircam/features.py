@@ -109,8 +109,8 @@ def find_ball(gray: np.ndarray, dark: bool = False, near=None):
 
 
 def measure(gray: np.ndarray, x: float, y: float, r: float, dark: bool = False):
-    """Refine a rough (x, y, r): grey levels of the ball and its surroundings, the threshold halfway, then the
-    centre by mean shift and the radius from the area above the threshold. Returns (x, y, r)."""
+    """Refine a rough (x, y, r): grey levels of the ball and its surroundings, then the centre and the radius from
+    the area a quarter of the way up from the background to the ball. Returns (x, y, r)."""
     g = np.asarray(gray, np.float32)
     if dark:
         g = 255.0 - g
@@ -123,8 +123,9 @@ def measure(gray: np.ndarray, x: float, y: float, r: float, dark: bool = False):
         if not inside.size or not ring.size:
             return None
         fg, bg = float(np.median(inside)), float(np.median(ring))
-        thr = 0.5 * (fg + bg)
-        on = (win > thr) & (dist < 1.25 * r)
+        # a quarter of the way up from the background: a lit ball's shaded edge is darker than the midpoint
+        # but still well above the background, and the radius (hence the mm scale) should include it
+        on = (win > bg + 0.25 * (fg - bg)) & (dist < 1.3 * r)
         if on.sum() < 5:
             return None
         r = math.sqrt(on.sum() / math.pi)
@@ -154,6 +155,8 @@ class Ball:
     bg: float                       # surrounding grey level
     ball_mm: float = BALL_MM
     dark: bool = False
+    outline: tuple = (0.0, 0.0)     # px from the tracked centre to the outline's centre (shading leans the
+                                    # tracked one towards the light; constant, so only the live view uses it)
 
     def __post_init__(self):
         self.rest = (float(self.rest[0]), float(self.rest[1]))
@@ -248,17 +251,21 @@ def setup(frames, dark: bool = False, near=None, ball_mm: float = BALL_MM):
     pos = np.array([b.locate(f) or (np.nan, np.nan) for f in frames], float)
     rest = np.nanmedian(pos, axis=0)
     jitter = float(np.nanstd(np.hypot(*(pos - rest).T))) * b.mm_per_px
-    return Ball(rest=(float(rest[0]), float(rest[1])), radius=r, fg=fg, bg=bg, ball_mm=ball_mm, dark=dark), still, jitter
+    outline = (float(x - rest[0]), float(y - rest[1]))
+    return (Ball(rest=(float(rest[0]), float(rest[1])), radius=r, fg=fg, bg=bg, ball_mm=ball_mm, dark=dark,
+                 outline=outline), still, jitter)
 
 
 def to_config(b: Ball) -> dict:
     return {"rest": [round(b.rest[0], 3), round(b.rest[1], 3)], "radius_px": round(b.radius, 3),
-            "fg": round(b.fg, 1), "bg": round(b.bg, 1), "ball_mm": b.ball_mm, "dark": b.dark}
+            "fg": round(b.fg, 1), "bg": round(b.bg, 1), "ball_mm": b.ball_mm, "dark": b.dark,
+            "outline": [round(b.outline[0], 3), round(b.outline[1], 3)]}
 
 
 def from_config(d: dict) -> Ball:
     return Ball(rest=tuple(d["rest"]), radius=float(d["radius_px"]), fg=float(d["fg"]), bg=float(d["bg"]),
-                ball_mm=float(d.get("ball_mm", BALL_MM)), dark=bool(d.get("dark", False)))
+                ball_mm=float(d.get("ball_mm", BALL_MM)), dark=bool(d.get("dark", False)),
+                outline=tuple(d.get("outline", (0.0, 0.0))))
 
 
 def save_image(path, gray, marks=()):

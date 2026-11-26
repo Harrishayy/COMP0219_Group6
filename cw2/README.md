@@ -19,7 +19,7 @@ see it in three places:
 | --- | --- | --- |
 | The **Wind Tunnel Logger** on the laptop | Our 200 Hz line plotted live against the pitot, and saved for marking | The demo, and every tunnel run |
 | The Pi's terminal (Pi Connect remote shell) | `aircam run` prints the speed, the frame rate, how often the ball was found, and the latency, once a second | Always |
-| `aircam preview` on the Pi's desktop (Pi Connect screen sharing) | The camera image with the tracked ball circled, its rest position, and the live speed | Setting up and checking. Never during a scored run: drawing makes the camera drop frames |
+| `aircam preview`: a window on the Pi's desktop, or `--web` in the laptop's browser | The live camera feed with the tracking drawn on it (below), and the speed, angle and a 10 s chart | Setting up and checking. Never during a scored run: drawing makes the camera drop frames |
 
 The screen simulator below also shows the Pi's speed against the truth live, in a strip chart.
 
@@ -37,7 +37,9 @@ Then, from anywhere:
 
 ```bash
 aircam setup        # fan off: finds the ball, saves where it rests (rerun whenever the camera or rig moves)
-aircam preview      # on the Pi's desktop: is the green circle on the ball? (q quits)
+aircam preview      # live feed with the tracking drawn on it (Pi desktop; q quits)
+aircam preview --web    # the same in the laptop's browser: open the address it prints
+aircam check        # 10 s of tracking, then a report: frames with the ball, noise in mm and m/s
 aircam run          # stream to the laptop; prints the speed once a second; Ctrl+C stops
 aircam start        # the same in the background, so closing the browser tab does not stop it
 aircam stop
@@ -57,6 +59,41 @@ through a 3.3 V USB–UART adapter:
 
 The laptop sees the adapter as `/dev/tty.usbserial-…` (or a COM port); pick it in the logger.
 `aircam install` turns the port on (`dtparam=uart0=on` → `/dev/ttyAMA0`).
+
+## How well is it tracking? (the real ball, no tunnel needed)
+
+**Watch it live.** Run `aircam preview`. Use the Pi's desktop or Pi Connect screen sharing, or run
+`aircam preview --web` in any shell and open the printed `http://<pi>:8080/` on the laptop (same network). On every
+shown frame:
+
+| Mark | Meaning |
+| --- | --- |
+| Yellow ring | Where the tracker searched this frame: 2 ball radii around where the ball was the frame before |
+| Green circle | The ball it found. Red means it lost the ball; the circle stays where it was last seen |
+| Blue cross | The ball's rest position from `aircam setup`; the green line from it to the ball is the reading |
+| Orange trail | Where the ball has been over the last half second |
+| Top left | Speed, the reading in mm, the angle, the frame rate, tracking time per frame, and how much of the last second had the ball |
+| Bottom | The last 10 s of speed |
+
+Push the ball by hand, or blow it with a fan or hairdryer, and watch the green circle stay on it. Hold it at a
+measured angle with a protractor and compare the angle shown: that checks the geometry. Add `--udp <laptop>` to
+also feed the screen simulator's panel.
+
+**Get numbers.** `aircam check` tracks for 10 s and reports:
+- the frame rate and how many frames had the ball;
+- the longest run of frames without it;
+- tracking time per frame;
+- where the ball sat (mm, angle, m/s on the current map);
+- the camera's own noise: frame to frame, in mm and in m/s at 2, 6 and 10 m/s;
+- any sudden jumps (reflections).
+
+Run it with the fan off for the noise floor, and with a fan blowing to see how the ball is followed. It saves
+`~/aircam-check.png` with the ball circled. If something is wrong, it says what to fix.
+
+**How the ball itself behaves.** `aircam pluck` measures how fast the ball swings and how quickly it settles.
+
+**The real score** needs the pitot: a tunnel run through the logger, then `aircam fit` (next section). It prints the
+logger's MSE before and after calibration.
 
 ## Calibrating
 
@@ -166,7 +203,8 @@ cd cw2/pi
 | `estimator.py` | Readings at 120 fps → a speed at every 5 ms tick (Kalman; gates glints) |
 | `stream.py` | The output lines (serial, UDP or stdout) and the 5 ms ticker |
 | `capture.py` | The camera, through Picamera2 |
-| `app.py` | `run` (two threads), `setup`, `preview`, the pluck recording |
+| `app.py` | `run` (two threads), `setup`, `preview`, `check`, the pluck recording |
+| `view.py` | The live view: the feed with the tracking drawn on it, in a window or a browser (MJPEG) |
 | `fit.py` | Calibration from a logger or simulator run; the pluck fit |
 | `demo.py` | The graded demo profile and the logger's scoring |
 | `rig.py` | The pendulum's physics, for the simulators |

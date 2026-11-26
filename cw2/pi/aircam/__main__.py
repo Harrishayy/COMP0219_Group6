@@ -2,7 +2,9 @@
 
 On the Pi (the config is ~/aircam.json unless --config or $AIRCAM_CONFIG says otherwise):
   setup      fan off: find the ball and save where it rests (run it whenever the camera or the rig moves)
-  preview    a window with the tracked ball and the live speed (Pi desktop or Pi Connect screen sharing)
+  preview    the live feed with the tracking drawn on it and the speed: a window on the Pi's desktop, or
+             --web to watch it in the laptop's browser; --udp HOST also feeds the screen simulator
+  check      track the ball for 10 s and report: frames with the ball, noise in mm and m/s, angle, speed
   run        stream the speed at 200 Hz to the serial port in the config (--udp HOST streams to the laptop's
              screen simulator instead); prints the speed once a second; Ctrl+C stops
   pluck      deflect the ball in still air and let go: its natural frequency and damping
@@ -50,7 +52,7 @@ def cmd_setup(a):
 
 def cmd_preview(a):
     from . import app
-    app.preview(_config(a)[1])
+    app.preview(_config(a)[1], web=a.web, port=a.web_port, udp=a.udp)
 
 
 def cmd_run(a):
@@ -73,6 +75,16 @@ def cmd_pluck(a):
         cfg.setdefault("estimator", {}).update(fn=round(r["fn"], 4), zeta=round(r["zeta"], 4))
         app.save(path, cfg)
         print(f"wrote fn and zeta into {path} (used when estimator.instrument is \"second\")")
+
+
+def cmd_check(a):
+    from . import app
+    path, cfg = _config(a)
+    print(f"tracking the ball for {a.seconds:g} s (fan off: the camera's noise floor; fan on: how it follows)")
+    r = app.check(cfg, a.seconds, image=path.with_name("aircam-check.png"))
+    print(app.report_text(r))
+    if "image" in r:
+        print(f"the last frame, with the ball circled and its rest marked: {r['image']}")
 
 
 def cmd_cal(a):
@@ -185,7 +197,12 @@ def main(argv=None):
     p = command("setup", cmd_setup, "fan off: find the ball and save where it rests")
     p.add_argument("--dark", action="store_true", help="the ball is darker than its background")
     p.add_argument("--near", help="X,Y: pick the round blob nearest this pixel instead of the biggest")
-    command("preview", cmd_preview, "window with the tracked ball and the live speed")
+    p = command("preview", cmd_preview, "live feed with the tracking drawn on it, and the speed")
+    p.add_argument("--web", action="store_true", help="serve it to a browser on the laptop instead of a window")
+    p.add_argument("--web-port", type=int, default=8080)
+    p.add_argument("--udp", help="HOST[:PORT]: also send the speed to the screen simulator, to compare with truth")
+    p = command("check", cmd_check, "track the ball for a few seconds and report how well (no desktop needed)")
+    p.add_argument("--seconds", type=float, default=10.0)
     p = command("run", cmd_run, "stream the speed at 200 Hz")
     p.add_argument("--port", help="serial device, '-' for stdout, or udp:HOST:PORT (default: output.port)")
     p.add_argument("--udp", help="HOST[:PORT] of the laptop running `aircam screen` (port 5005 by default)")
