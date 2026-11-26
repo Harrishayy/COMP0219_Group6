@@ -1,9 +1,8 @@
 {
-  "about": "Example calibration file: a white ball on a pendulum, its pivot at (660, 120). Replace with the prototype's.",
-  "camera": {"size": [1332, 990], "bit_depth": 10, "fps": 120.0, "exposure_us": 4000, "gain": 4.0, "offset_s": 0.0},
-  "feature": {"kind": "pendulum", "roi": [460, 300, 400, 400], "pivot": [660, 120], "threshold": 200, "output": "tan"},
-  "model": {"type": "power", "k": 14.0, "y0": 0.0, "p": 2.0, "v0": 0.0},
-  "estimator": {"name": "kalman", "sigma_y": 0.002, "q_v": 10.0, "instrument": "none"},
-  "rate_hz": 200.0,
-  "baud": 115200
+  "about": "The Pi's calibration file (~/aircam.json). `aircam setup` fills in ball; `aircam fit` gives map.k and map.arm_mm; `aircam set key=value` changes anything.",
+  "camera": {"size": [1332, 990], "bit_depth": 10, "fps": 120.0, "exposure_us": 3000, "gain": 4.0, "offset_s": 0.0},
+  "ball": null,
+  "map": {"type": "pendulum", "k": 8.6, "arm_mm": 150.0, "d0": 0.0},
+  "estimator": {"name": "kalman", "sigma_y": 0.3, "q_v": 30.0, "instrument": "none", "fn": 1.4, "zeta": 0.08},
+  "output": {"port": "/dev/ttyAMA0", "baud": 115200, "rate_hz": 200.0}
 }

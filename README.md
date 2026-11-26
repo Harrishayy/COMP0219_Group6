@@ -6,10 +6,10 @@ against the tunnel's pitot, from the CSVs the TA's Wind Tunnel Logger saves.
 
 | | Coursework 1: [`cw1/`](cw1/README.md) | Coursework 2: [`cw2/`](cw2/README.md) |
 | --- | --- | --- |
-| Sensing | Contact: a drag plate on a load cell | Contactless: a camera watching a passive instrument |
+| Sensing | Contact: a drag plate on a load cell | Contactless: a camera tracking a ping pong ball pendulum |
 | Runs on | Nucleo-F411RE (C++, PlatformIO) | Raspberry Pi 5 + HQ camera (Python, Picamera2) |
 | Brief | `cw1/docs/project-brief-part1.pdf` | `cw2/docs/project-brief-part2.pdf`, as requirements in `cw2/docs/brief.md` |
-| Status | Demo done; calibration history in `cw1/docs/` | Algorithms in `cw2/pi/aircam/`, prototype to come. Demo 11 Dec, report 16 Dec 16:00 |
+| Status | Demo done; calibration history in `cw1/docs/` | Ball-pendulum tracker and screen simulator in `cw2/`, prototype to come. Demo 11 Dec, report 16 Dec 16:00 |
 
 Work inside one coursework at a time: `cd cw1` or `cd cw2` first. Each one's commands and paths are relative to
 its own folder, and each has its own `.venv`.

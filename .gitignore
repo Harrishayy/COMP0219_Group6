@@ -22,3 +22,6 @@ pnpm-lock.yaml
 
 # Editor design-hook caches
 .impeccable/
+
+# Screen-simulator runs (cw2/aircam screen): local rehearsals; force-add one to keep it
+cw2/data/sim/

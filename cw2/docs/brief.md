@@ -5,10 +5,10 @@ confirm this year's dates with the module team.
 
 | Requirement | Detail | Where it is handled |
 | --- | --- | --- |
-| Contactless | The camera (or a ToF/ultrasonic sensor) senses an instrument in the air indirectly; the instrument is passive (no power) | the prototype; `pi/aircam/features.py` |
+| Contactless | The camera (or a ToF/ultrasonic sensor) senses an instrument in the air indirectly; the instrument is passive (no power) | a ping pong ball pendulum, tracked by the camera: `pi/aircam/features.py` |
 | Range | 2–10 m/s, including steps and ramps; no direction | `pi/aircam/demo.py` profile, scored on 2–10 |
-| Output | A float per line at 200 Hz, 115200 baud, to a virtual COM port over USB | `pi/aircam/stream.py`; transport is an open decision ([algorithms §4](algorithms.md#4-output-200-lines-a-second-never-a-drop)) |
-| Autonomous | Software runs on the Pi; the remote interface only starts and stops it | `pi/deploy/aircam.service` (systemctl start/stop from a Pi Connect shell) |
+| Output | A float per line at 200 Hz, 115200 baud, to a virtual COM port over USB | `pi/aircam/stream.py`, through a USB–UART adapter on the Pi's serial port ([algorithms §4](algorithms.md#4-output-200-lines-a-second-never-a-drop)) |
+| Autonomous | Software runs on the Pi; the remote interface only starts and stops it | `aircam start` / `aircam stop` (the systemd unit in `pi/deploy/`), or `aircam run` in a Pi Connect shell |
 | Below 200 Hz | Upsample to the ground truth's rate and state the interpolation method and why | [algorithms §3](algorithms.md#3-estimator-upsampling-to-200-hz-the-brief-asks-us-to-state-and-justify-this) |
 | Envelope | Fits in 30 × 30 × 30 cm and mounts on the 30 cm square plate | the prototype |
 | Safety | Guards on rotating parts, magnets epoxied or heat-shrunk, no sharp edges | the prototype |
@@ -18,7 +18,7 @@ confirm this year's dates with the module team.
 ## Deliverables
 
 - **Live demo (11 Dec):** the device on the plate, a real-time 200 Hz stream, and the calibration file on demand
-  (`aircam cal`).
+  (`aircam cal`). The stream is shown live by the Wind Tunnel Logger against the pitot.
 - **Code:** the Pi code (with the HQ camera), or a buildable CubeIDE/PlatformIO project; no PC-side processing.
 - **Report (16 Dec, 16:00):** 6 pages, IEEE style. It covers design rationale, modelling, calibration method,
   error budget, dynamic results (MSE, bias, σ), limitations and originality. It must also state:

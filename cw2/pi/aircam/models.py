@@ -1,70 +1,48 @@
-"""Static calibration maps: the instrument's steady reading y (what the camera measures) to airspeed v in m/s.
+"""The calibration map: how far the ball has moved from rest (d, mm) to airspeed (m/s).
 
-Every map has `speed(y)`, its inverse `reading(v)` and `dreading_dv(v)` (the estimators use the slope to put
-their process noise in m/s terms). Maps round-trip through JSON so the calibration file the Pi runs from is
-the one shown on demand.
+The instrument is a ping pong ball on a straw, hung from a hinge between two pillars. In steady air the drag on the
+ball and its weight balance about the hinge, tan θ = drag / weight = (½ρ·Cd·A / m·g)·v², so v = k·√tan θ. The
+camera measures the chord d the ball's centre has moved from where it hangs in still air, d = 2·arm·sin(θ/2), which
+needs no pivot position in the image and stays sensitive at large angles (at 55° the chord still grows at 0.88 of
+the arc, where the horizontal shift alone grows at 0.57).
 
-PowerLaw covers the two physics we are likely to build:
-  - drag on a deflecting body (flap, pendulum, cantilever): reading ∝ force ∝ v², so p = 2 and v = k·√(y − y0)
-  - a rotor (cups, propeller, Savonius) read as a rate: rate ∝ v above a start-up speed, so p = 1 and
-    v = v0 + k·(y − y0)
-Table is a monotone piecewise-linear correction for whatever the physics misses, fitted from tunnel runs.
+Two numbers: k (m/s) and arm (mm, hinge to ball centre, in the same mm as d). A bare 2.7 g, 40 mm ball has
+k = √(2·m·g / (ρ·Cd·A)) ≈ 8.6 m/s; the straw's weight and drag move it, so k (and arm, which also absorbs the
+straw) are fitted from a tunnel run (`aircam fit`). The map has `speed(d)`, its inverse `reading(v)` and
+`dreading_dv(v)` (the Kalman filter uses the slope to put its process noise in m/s terms).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
-
-@dataclass
-class PowerLaw:
-    k: float                # m/s per reading^(1/p)
-    y0: float = 0.0         # reading in still air
-    p: float = 2.0          # reading ∝ (v − v0)^p
-    v0: float = 0.0         # speed at which the reading starts to rise (a rotor's start-up speed)
-    type: str = field(default="power", init=False)
-
-    def speed(self, y):
-        s = np.maximum(np.asarray(y, float) - self.y0, 0.0)
-        v = self.v0 + self.k * s ** (1.0 / self.p)
-        return np.where(s > 0, v, 0.0) if self.v0 else v
-
-    def reading(self, v):
-        s = np.maximum(np.asarray(v, float) - self.v0, 0.0) / self.k
-        return self.y0 + s ** self.p
-
-    def dreading_dv(self, v):
-        s = np.maximum(np.asarray(v, float) - self.v0, 1e-6) / self.k
-        return self.p / self.k * s ** (self.p - 1.0)
+THETA_MAX = math.radians(80.0)      # past this the ball is near the downstream pillar: clamp, do not extrapolate
 
 
 @dataclass
-class Table:
-    """Monotone piecewise-linear map through calibration points (y must increase; v is made non-decreasing)."""
-    y: list
-    v: list
-    type: str = field(default="table", init=False)
+class Pendulum:
+    k: float = 8.6                  # m/s at tan θ = 1
+    arm_mm: float = 150.0           # hinge to ball centre
+    d0: float = 0.0                 # reading in still air (setup measures the rest position, so 0)
+    type: str = field(default="pendulum", init=False)
 
-    def __post_init__(self):
-        y, v = np.asarray(self.y, float), np.maximum.accumulate(np.asarray(self.v, float))
-        if len(y) < 2 or np.any(np.diff(y) <= 0):
-            raise ValueError("Table needs at least two points with increasing y")
-        self._y, self._v = y, v
+    def theta(self, d):
+        s = np.clip((np.asarray(d, float) - self.d0) / (2.0 * self.arm_mm), 0.0, math.sin(THETA_MAX / 2))
+        return 2.0 * np.arcsin(s)
 
-    def speed(self, y):
-        return np.interp(np.asarray(y, float), self._y, self._v)
+    def speed(self, d):
+        return self.k * np.sqrt(np.tan(self.theta(d)))
 
     def reading(self, v):
-        # The inverse of a non-decreasing table: nudge flat stretches up by a hair so interp has increasing xp.
-        return np.interp(np.asarray(v, float), self._v + 1e-9 * np.arange(self._v.size), self._y)
+        th = np.minimum(np.arctan((np.maximum(np.asarray(v, float), 0.0) / self.k) ** 2), THETA_MAX)
+        return self.d0 + 2.0 * self.arm_mm * np.sin(th / 2.0)
 
     def dreading_dv(self, v):
-        v = np.asarray(v, float)
-        dv, dy = np.diff(self._v), np.diff(self._y)
-        slope = np.where(dv > 0, dy / np.maximum(dv, 1e-12), np.inf)
-        i = np.clip(np.searchsorted(self._v, v, side="right") - 1, 0, len(slope) - 1)
-        return np.minimum(slope[i], 1e6)
+        s = np.maximum(np.asarray(v, float), 1e-6) / self.k
+        th = np.arctan(s * s)
+        return self.arm_mm * np.cos(th / 2.0) * (2.0 * s / self.k) / (1.0 + s ** 4)
 
 
 def to_dict(m) -> dict:
@@ -75,9 +53,7 @@ def to_dict(m) -> dict:
 
 def from_dict(d: dict):
     d = dict(d)
-    kind = d.pop("type", "power")
-    if kind == "power":
-        return PowerLaw(**d)
-    if kind == "table":
-        return Table(**d)
+    kind = d.pop("type", "pendulum")
+    if kind == "pendulum":
+        return Pendulum(**d)
     raise ValueError(f"unknown map type {kind!r}")

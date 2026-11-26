@@ -57,6 +57,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r cw2/pi/requirements.txt
-      - name: Camera sensor algorithms (aircam)
+      - run: pip install -r cw2/pi/requirements-laptop.txt
+      - name: Camera sensor, screen simulator and the filmed-screen end-to-end checks (aircam)
+        env:
+          SDL_VIDEODRIVER: dummy
         run: python -m pytest -q cw2/pi/tests

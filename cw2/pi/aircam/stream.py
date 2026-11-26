@@ -56,12 +56,26 @@ class Ticker:
         return tick
 
 
+def comment(**kv) -> bytes:
+    """A '# aircam k=… arm=…' line: the logger skips lines starting with '#', and the screen simulator keeps the
+    values so `aircam fit` knows which map the run used."""
+    return ("# aircam " + " ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in kv.items())
+            + "\n").encode()
+
+
 class Sink:
-    """A serial port (pyserial), or stdout when port is '-'."""
+    """Where the lines go: a serial port (pyserial), stdout when port is '-', or udp:HOST:PORT (one datagram per
+    line, to the screen simulator on the laptop; nothing waits for it, so a missing listener costs nothing)."""
 
     def __init__(self, port: str = "-", baud: int = 115200):
         if port == "-":
             self._w, self._close = sys.stdout.buffer.write, lambda: sys.stdout.flush()
+        elif port.startswith("udp:"):
+            import socket
+            host, _, p = port[4:].rpartition(":")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            addr = (host or p, int(p) if host else 5005)
+            self._w, self._close = (lambda data: sock.sendto(data, addr)), sock.close
         else:
             import serial
             s = serial.Serial(port, baud, write_timeout=0.05)

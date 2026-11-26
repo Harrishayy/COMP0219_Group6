@@ -1,0 +1,6 @@
+# The Mac: the screen simulator (python -m aircam screen) and the tests. The Pi does not use pygame:
+# it takes requirements.txt's packages from apt.
+numpy>=1.24
+pyserial>=3.5
+pytest>=7
+pygame>=2.5
