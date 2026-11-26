@@ -1,6 +1,6 @@
-"""The live view: the camera feed with what the tracker sees drawn on it, so you can watch how well it follows the
-ball while the numbers update. Shown in a window on the Pi's desktop (Pi Connect screen sharing), or served to a
-browser on the laptop as an MJPEG stream (`aircam preview --web`), which needs no desktop at all.
+"""The live view: the colour camera feed with what the tracker sees drawn on it, so you can watch how well it
+follows the ball while the numbers update. Shown in a window on the Pi's desktop (Pi Connect screen sharing), or
+served to a browser on the laptop as an MJPEG stream (`aircam real view --web`), which needs no desktop at all.
 
 Drawn on every shown frame:
   yellow ring   where the tracker searched this frame (2 radii round where the ball was the frame before)
@@ -49,7 +49,8 @@ class Overlay:
     def draw(self, gray, fps: float = 0.0, ms: float = 0.0, scale: float = 0.5, note: str = ""):
         import cv2
 
-        img = cv2.cvtColor(np.ascontiguousarray(gray), cv2.COLOR_GRAY2BGR)
+        img = np.ascontiguousarray(gray) if gray.ndim == 3 else cv2.cvtColor(np.ascontiguousarray(gray),
+                                                                             cv2.COLOR_GRAY2BGR)
         k = scale
         img = cv2.resize(img, (int(img.shape[1] * k), int(img.shape[0] * k)), interpolation=cv2.INTER_AREA)
         ox, oy = self.ball.outline                  # draw on the ball's outline, not its light-leaning centroid

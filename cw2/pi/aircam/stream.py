@@ -56,6 +56,12 @@ class Ticker:
         return tick
 
 
+def udp_port(address: str) -> str:
+    """'10.0.0.5' or '10.0.0.5:5005' as a Sink port: udp:HOST:PORT (5005 unless given)."""
+    address = address[4:] if address.startswith("udp:") else address
+    return f"udp:{address if ':' in address else address + ':5005'}"
+
+
 def comment(**kv) -> bytes:
     """A '# aircam k=… arm=…' line: the logger skips lines starting with '#', and the screen simulator keeps the
     values so `aircam fit` knows which map the run used."""

@@ -850,7 +850,7 @@ class Panel:
         if rx.port:
             port = "" if rx.port == 5005 else f":{rx.port}"
             bottom[:0] = [(self.small, "on the Pi:", LABEL),
-                          (self.med, _fit(self.med, f"aircam run --udp {rx.ip}{port}", inner), VALUE)]
+                          (self.med, _fit(self.med, f"aircam sim run {rx.ip}{port}", inner), VALUE)]
         if live.last_name:
             bottom += [(self.small, f"last run {live.last_name}" + (" (aborted)" if live.last_aborted else ""), LABEL),
                        (self.small, live.result, LABEL),

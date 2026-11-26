@@ -1,17 +1,25 @@
 """From a camera frame to one number: how far the ball has moved from where it hangs in still air, in mm.
 
-Setup (`find_ball`, once, fan off) finds the ball as the biggest round bright blob in the frame and measures it: its
-rest position, its radius (a ping pong ball is 40 mm, so the radius sets the mm per pixel), and the grey levels of
-the ball and of what is around it. Nothing about the scene is assumed beyond "a round thing brighter than its
-surroundings" (`dark` flips that), so the same code tracks the real ball and the screen simulator's.
+Frames are colour (BGR, as Picamera2's RGB888 gives them); a grey frame works too.
 
-Every frame (`Ball`), the centre is found by a shrinking mean shift from where it was last: the soft-thresholded
-centroid inside a disc of 2, 1.5, then 1.25 radii. The disc keeps the straw, the pillars and glints out of the
-centroid; the soft threshold (0 at the midpoint grey, 1 half the contrast above it) gives sub-pixel positions from
-the ball's edge. Only a window around the ball is touched, sub-sampled so the ball spans ~32 pixels, so a frame
-costs well under a millisecond however close the camera is. If the ball is not where it was (occluded, a glint, a
-camera knock), a coarse search over the whole frame finds it again; until then the frame gives no reading and the
-estimator just skips it.
+Detection (`setup`, once, fan off, then confirmed by eye: `aircam real detect`) finds the ping pong ball as the
+biggest round blob that stands out by brightness (a white ball on a dark background) or by colour (an orange ball
+on a pale one). It then measures:
+  - its rest position;
+  - its radius (a ping pong ball is 40 mm, so the radius sets the mm per pixel);
+  - the ball's colour and the colour around it.
+Nothing about the scene is assumed beyond "a round thing that differs from its surroundings", so the same code
+tracks the real ball and the screen simulator's.
+
+Every frame (`Ball`), each pixel near the ball gets a "ballness" score: its colour projected onto the line from
+the background's colour (0) to the ball's (1). The centre is then found by a shrinking mean shift from where it was
+last: the soft-thresholded centroid of that score inside a disc of 2, 1.5, then 1.25 radii.
+  - The disc keeps the straw, the pillars and glints out.
+  - The soft threshold (0 at a score of 0.5, 1 at 0.75) gives sub-pixel positions from the ball's edge.
+  - Only a window around the ball is touched, sub-sampled so the ball spans ~32 pixels, so a frame costs well under
+    a millisecond however close the camera is.
+  - If the ball is not where it was, a coarse search over the whole frame finds it again; until then the frame gives
+    no reading.
 
 The reading is the distance from the rest position, which needs neither the hinge's position in the image nor a
 level camera: the map (models.Pendulum) turns the chord into an angle.
@@ -72,48 +80,55 @@ def _erode(on: np.ndarray, n: int) -> np.ndarray:
     return on
 
 
-def find_ball(gray: np.ndarray, dark: bool = False, near=None):
-    """(x, y, r) in pixels of the biggest round blob brighter than its surroundings (darker, with dark), or None.
-    near=(x, y) prefers the blob closest to that point instead of the biggest.
+def channels(img) -> list:
+    """Single-channel images in which a ping pong ball stands out: brightness (a white ball on a dark background)
+    and colourfulness, max − min of B, G, R (an orange ball on a pale or grey one)."""
+    a = np.asarray(img, np.float32)
+    if a.ndim == 2:
+        return [a]
+    return [a.mean(axis=2), a.max(axis=2) - a.min(axis=2)]
 
-    The blob is looked for at several grey levels, from the one that splits the frame from its background up to
-    near the brightest pixel: at a low level a light straw or frame can join the ball into one long shape, at a
-    higher one the ball stands alone. The biggest round shape at any level wins (a highlight on the ball is
-    round too, but smaller)."""
-    g = np.asarray(gray, np.float32)
-    if dark:
-        g = 255.0 - g
-    step = max(1, min(g.shape) // 240)
-    c = g[::step, ::step]
-    lo, hi = otsu(c), float(np.percentile(c, 99.9))
+
+def find_ball(img: np.ndarray, near=None):
+    """(x, y, r) in pixels of the biggest round blob that stands out by brightness or by colour, or None.
+    near=(x, y) prefers the blob closest to that point instead (when the biggest one is not the ball).
+
+    The blob is looked for at several levels, from the one that splits the frame from its background up to near
+    the strongest pixel: at a low level a light straw or frame can join the ball into one long shape, at a higher
+    one the ball stands alone. The biggest round shape at any level wins (a highlight on the ball is round too,
+    but smaller)."""
     best, best_key = None, None
-    for level in np.linspace(lo, lo + 0.85 * max(hi - lo, 0.0), 6):
-        lab = label(_erode(c > level, 2))         # erode: cut a thin straw that joins the ball to the frame
-        ids, area = np.unique(lab[lab > 0], return_counts=True)
-        for i, a in zip(ids, area):
-            if a < 6:
-                continue
-            ys, xs = np.nonzero(lab == i)
-            w, h = int(np.ptp(xs)) + 1, int(np.ptp(ys)) + 1
-            fill = a / (w * h)                   # a disc fills π/4 = 0.785 of its bounding box
-            if min(w, h) / max(w, h) < 0.7 or not 0.55 < fill < 0.95:
-                continue
-            x, y = (xs.mean() + 0.5) * step - 0.5, (ys.mean() + 0.5) * step - 0.5
-            r = (math.sqrt(a / math.pi) + 2) * step  # + the erosion
-            key = -math.hypot(x - near[0], y - near[1]) if near else a
-            if best_key is None or key > best_key:
-                best, best_key = (x, y, r), key
+    for g in channels(img):
+        step = max(1, min(g.shape) // 240)
+        c = g[::step, ::step]
+        if float(np.percentile(c, 99.9)) - float(np.median(c)) < 40:
+            continue                             # nothing stands out here (colour on a grey scene is just noise)
+        lo, hi = otsu(c), float(np.percentile(c, 99.9))
+        for level in np.linspace(lo, lo + 0.85 * max(hi - lo, 0.0), 6):
+            lab = label(_erode(c > level, 2))     # erode: cut a thin straw that joins the ball to the frame
+            ids, area = np.unique(lab[lab > 0], return_counts=True)
+            for i, a in zip(ids, area):
+                if a < 6:
+                    continue
+                ys, xs = np.nonzero(lab == i)
+                w, h = int(np.ptp(xs)) + 1, int(np.ptp(ys)) + 1
+                fill = a / (w * h)               # a disc fills π/4 = 0.785 of its bounding box
+                if min(w, h) / max(w, h) < 0.7 or not 0.55 < fill < 0.95:
+                    continue
+                x, y = (xs.mean() + 0.5) * step - 0.5, (ys.mean() + 0.5) * step - 0.5
+                r = (math.sqrt(a / math.pi) + 2) * step   # + the erosion
+                key = -math.hypot(x - near[0], y - near[1]) if near else a
+                if best_key is None or key > best_key:
+                    best, best_key = (g, x, y, r), key
     if best is None:
         return None
-    return measure(gray, *best, dark=dark)
+    return measure(*best)
 
 
-def measure(gray: np.ndarray, x: float, y: float, r: float, dark: bool = False):
+def measure(gray: np.ndarray, x: float, y: float, r: float):
     """Refine a rough (x, y, r): grey levels of the ball and its surroundings, then the centre and the radius from
     the area a quarter of the way up from the background to the ball. Returns (x, y, r)."""
     g = np.asarray(gray, np.float32)
-    if dark:
-        g = 255.0 - g
     for _ in range(3):
         y0, y1 = max(int(y - 3 * r), 0), min(int(y + 3 * r) + 2, g.shape[0])
         x0, x1 = max(int(x - 3 * r), 0), min(int(x + 3 * r) + 2, g.shape[1])
@@ -134,27 +149,26 @@ def measure(gray: np.ndarray, x: float, y: float, r: float, dark: bool = False):
     return x, y, r
 
 
-def levels(gray: np.ndarray, x: float, y: float, r: float, dark: bool = False):
-    """(ball grey, surrounding grey) medians, in the polarity the tracker works in."""
-    g = np.asarray(gray, np.float32)
-    if dark:
-        g = 255.0 - g
-    y0, y1 = max(int(y - 3 * r), 0), min(int(y + 3 * r) + 2, g.shape[0])
-    x0, x1 = max(int(x - 3 * r), 0), min(int(x + 3 * r) + 2, g.shape[1])
-    win = g[y0:y1, x0:x1]
+def levels(img: np.ndarray, x: float, y: float, r: float):
+    """(ball colour, surrounding colour): per-channel medians inside 0.6 r and in a ring at 1.6–2.4 r."""
+    a = np.asarray(img, np.float32)
+    if a.ndim == 2:
+        a = a[..., None]
+    y0, y1 = max(int(y - 3 * r), 0), min(int(y + 3 * r) + 2, a.shape[0])
+    x0, x1 = max(int(x - 3 * r), 0), min(int(x + 3 * r) + 2, a.shape[1])
+    win = a[y0:y1, x0:x1]
     dist = np.hypot(np.arange(x0, x1)[None, :] - x, np.arange(y0, y1)[:, None] - y)
-    return float(np.median(win[dist < 0.6 * r])), float(np.median(win[(dist > 1.6 * r) & (dist < 2.4 * r)]))
+    return np.median(win[dist < 0.6 * r], axis=0), np.median(win[(dist > 1.6 * r) & (dist < 2.4 * r)], axis=0)
 
 
 @dataclass
 class Ball:
-    """Per-frame tracker. Call it with the Y plane: returns d in mm (None when the ball is not found)."""
+    """Per-frame tracker. Call it with a frame (BGR, or grey): returns d in mm (None when the ball is not found)."""
     rest: tuple                     # (x, y) px: the ball's centre in still air
     radius: float                   # px
-    fg: float                       # ball grey level
-    bg: float                       # surrounding grey level
+    fg: object                      # the ball's colour (B, G, R), or grey level
+    bg: object                      # the colour around it
     ball_mm: float = BALL_MM
-    dark: bool = False
     outline: tuple = (0.0, 0.0)     # px from the tracked centre to the outline's centre (shading leans the
                                     # tracked one towards the light; constant, so only the live view uses it)
 
@@ -162,16 +176,24 @@ class Ball:
         self.rest = (float(self.rest[0]), float(self.rest[1]))
         self.pos = self.rest
         self.mm_per_px = self.ball_mm / (2.0 * self.radius)
-        self.thr = 0.5 * (self.fg + self.bg)
-        self.band = max(0.25 * abs(self.fg - self.bg), 1.0)     # soft edge: thr → 0, thr + band → 1
-        self.step = max(1, int(self.radius // 16))              # work on the ball at ~16 px radius
-        self.mass = None                                        # weight of the ball at rest, set by the first fix
+        self._bg = np.atleast_1d(np.asarray(self.bg, np.float32))
+        a = np.atleast_1d(np.asarray(self.fg, np.float32)) - self._bg
+        self._dir = a / max(float(np.sum(a * a)), 1.0)       # ballness = (colour − bg)·dir: 0 at bg, 1 at the ball
+        self.contrast = float(np.sqrt(np.sum(a * a)))
+        self.step = max(1, int(self.radius // 16))          # work on the ball at ~16 px radius
+        self.mass = None                                    # weight of the ball at rest, set by the first fix
         self.lost = 0
 
-    def _weights(self, win):
+    def ballness(self, win):
         a = win.astype(np.float32)
-        a = (self.thr - a) if self.dark else (a - self.thr)
-        return np.clip(a * (1.0 / self.band), 0.0, 1.0)
+        if a.ndim == 3 and self._dir.size == a.shape[2]:
+            return ((a - self._bg) * self._dir).sum(axis=2)
+        if a.ndim == 3:                                     # a colour frame for a grey calibration
+            a = a.mean(axis=2)
+        return (a - float(self._bg.mean())) * float(self._dir.sum())
+
+    def _weights(self, win):
+        return np.clip((self.ballness(win) - 0.5) * 4.0, 0.0, 1.0)
 
     def _centroid(self, gray, x, y, rad):
         s = self.step
@@ -235,48 +257,48 @@ class Ball:
         return math.hypot(c[0] - self.rest[0], c[1] - self.rest[1]) * self.mm_per_px
 
 
-def setup(frames, dark: bool = False, near=None, ball_mm: float = BALL_MM):
+def setup(frames, near=None, ball_mm: float = BALL_MM):
     """From still-air frames: (Ball, median frame, still-air jitter in mm), or (None, median frame, nan).
 
     The ball is found and measured on the median frame; its rest position is then the median of where the tracker
     itself puts it, frame by frame, so that a shaded ball's centroid offset is in the rest position too."""
     frames = [np.asarray(f) for f in frames]
     still = np.median(np.stack(frames), axis=0).astype(np.uint8)
-    found = find_ball(still, dark=dark, near=near)
+    found = find_ball(still, near=near)
     if found is None:
         return None, still, float("nan")
     x, y, r = found
-    fg, bg = levels(still, x, y, r, dark)
-    b = Ball(rest=(x, y), radius=r, fg=fg, bg=bg, ball_mm=ball_mm, dark=dark)
+    fg, bg = levels(still, x, y, r)
+    b = Ball(rest=(x, y), radius=r, fg=fg, bg=bg, ball_mm=ball_mm)
     pos = np.array([b.locate(f) or (np.nan, np.nan) for f in frames], float)
     rest = np.nanmedian(pos, axis=0)
     jitter = float(np.nanstd(np.hypot(*(pos - rest).T))) * b.mm_per_px
     outline = (float(x - rest[0]), float(y - rest[1]))
-    return (Ball(rest=(float(rest[0]), float(rest[1])), radius=r, fg=fg, bg=bg, ball_mm=ball_mm, dark=dark,
-                 outline=outline), still, jitter)
+    return Ball(rest=(float(rest[0]), float(rest[1])), radius=r, fg=fg, bg=bg, ball_mm=ball_mm,
+                outline=outline), still, jitter
 
 
 def to_config(b: Ball) -> dict:
+    vec = lambda v: [round(float(c), 1) for c in np.atleast_1d(v)]       # noqa: E731
     return {"rest": [round(b.rest[0], 3), round(b.rest[1], 3)], "radius_px": round(b.radius, 3),
-            "fg": round(b.fg, 1), "bg": round(b.bg, 1), "ball_mm": b.ball_mm, "dark": b.dark,
+            "fg": vec(b.fg), "bg": vec(b.bg), "ball_mm": b.ball_mm,
             "outline": [round(b.outline[0], 3), round(b.outline[1], 3)]}
 
 
 def from_config(d: dict) -> Ball:
-    return Ball(rest=tuple(d["rest"]), radius=float(d["radius_px"]), fg=float(d["fg"]), bg=float(d["bg"]),
-                ball_mm=float(d.get("ball_mm", BALL_MM)), dark=bool(d.get("dark", False)),
-                outline=tuple(d.get("outline", (0.0, 0.0))))
+    return Ball(rest=tuple(d["rest"]), radius=float(d["radius_px"]), fg=d["fg"], bg=d["bg"],
+                ball_mm=float(d.get("ball_mm", BALL_MM)), outline=tuple(d.get("outline", (0.0, 0.0))))
 
 
-def save_image(path, gray, marks=()):
-    """Save a grayscale frame with circles drawn on it, for checking setup: PNG through OpenCV when it is there
-    (it is on the Pi, from apt), else a PGM that needs nothing. marks: (x, y, r) circles. Returns the path."""
-    img = np.asarray(gray, np.uint8)
+def save_image(path, img, marks=()):
+    """Save a frame (colour or grey) with circles drawn on it: PNG through OpenCV when it is there (it is on the
+    Pi, from apt), else a PPM/PGM that needs nothing. marks: (x, y, r) circles. Returns the path."""
+    img = np.asarray(img, np.uint8)
     try:
         import cv2
-        out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        out = img.copy() if img.ndim == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         for x, y, r in marks:
-            cv2.circle(out, (int(round(x)), int(round(y))), max(int(round(r)), 2), (0, 0, 255), 2)
+            cv2.circle(out, (int(round(x)), int(round(y))), max(int(round(r)), 2), (0, 255, 0), 2)
         cv2.imwrite(str(path), out)
         return str(path)
     except ImportError:
@@ -286,7 +308,9 @@ def save_image(path, gray, marks=()):
             xx = np.clip(np.round(x + r * np.cos(a)).astype(int), 0, out.shape[1] - 1)
             yy = np.clip(np.round(y + r * np.sin(a)).astype(int), 0, out.shape[0] - 1)
             out[yy, xx] = 255 - out[yy, xx] // 2
-        path = str(path).rsplit(".", 1)[0] + ".pgm"
+        colour = out.ndim == 3
+        path = str(path).rsplit(".", 1)[0] + (".ppm" if colour else ".pgm")
         with open(path, "wb") as f:
-            f.write(f"P5 {out.shape[1]} {out.shape[0]} 255\n".encode() + out.tobytes())
+            f.write(f"{'P6' if colour else 'P5'} {out.shape[1]} {out.shape[0]} 255\n".encode()
+                    + (out[..., ::-1] if colour else out).tobytes())
         return path

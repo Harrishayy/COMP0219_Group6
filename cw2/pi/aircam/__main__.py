@@ -1,35 +1,34 @@
 """aircam: the camera airspeed sensor (a ping pong ball pendulum, tracked by the Pi's camera).
 
-On the Pi (the config is ~/aircam.json unless --config or $AIRCAM_CONFIG says otherwise):
-  setup      fan off: find the ball and save where it rests (run it whenever the camera or the rig moves)
-  preview    the live feed with the tracking drawn on it and the speed: a window on the Pi's desktop, or
-             --web to watch it in the laptop's browser; --udp HOST also feeds the screen simulator
-  check      track the ball for 10 s and report: frames with the ball, noise in mm and m/s, angle, speed
-  run        stream the speed at 200 Hz to the serial port in the config (--udp HOST streams to the laptop's
-             screen simulator instead); prints the speed once a second; Ctrl+C stops
-  pluck      deflect the ball in still air and let go: its natural frequency and damping
-  cal        print the calibration file (the brief's "calibration file on demand")
-  set        change config values: aircam set k=9.1 arm=148 (aliases: k arm port exposure gain fps sigma q)
+The physical rig, on the Pi (calibration in ~/aircam-real.json, output on the serial port to the logger):
+  aircam real detect     1. fan off: find the ping pong ball, show it in colour, confirm it (nothing runs before)
+  aircam real view       2. watch the tracking live: a window on the Pi's desktop, or --web in the laptop's browser
+  aircam real run        3. stream 200 Hz to the logger; prints the speed once a second; Ctrl+C stops
+  aircam real check      10 s of tracking, then a report      aircam real pluck   the ball's swing and damping
+  aircam real cal        the calibration file                 aircam real set k=… arm=…   change it
+
+The screen simulation, on the Pi, its camera on the laptop running `aircam screen` (calibration in ~/aircam-sim.json):
+  aircam sim detect      1. find the simulated ball, confirm it
+  aircam sim view        2. watch the tracking (also feeds the simulator's panel, once run has its address)
+  aircam sim run LAPTOP  3. stream to the simulator over Wi-Fi (the address is on its panel; remembered after)
+  aircam sim check | pluck | cal | set …
 
 On the laptop:
-  screen     the screen simulator: the pendulum on this screen for the Pi's camera, scored like the logger
-  fit        fit the map from a recorded run (<run>_aligned.csv from the logger or the screen simulator)
-  sim        the whole chain simulated without a camera, scored on the graded demo
-  compare    estimators x frame rates on the simulated demo, as a Markdown table
+  aircam screen          the simulator: the pendulum on this screen, DEMO / MANUAL, truth against the Pi
+  aircam fit RUN_aligned.csv    calibrate from a recorded run (the logger's, or the simulator's)
+  aircam offline [--compare]    the whole chain without a camera, for design choices
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
 import sys
 from dataclasses import fields, replace
 from pathlib import Path
 
 ALIASES = {"k": "map.k", "arm": "map.arm_mm", "port": "output.port", "exposure": "camera.exposure_us",
            "gain": "camera.gain", "fps": "camera.fps", "sigma": "estimator.sigma_y", "q": "estimator.q_v"}
-DEFAULT_CONFIG = os.environ.get("AIRCAM_CONFIG", "~/aircam.json")
+CONFIGS = {"real": "~/aircam-real.json", "sim": "~/aircam-sim.json"}
 
 
 def _config(a, create: bool = False) -> tuple[Path, dict]:
@@ -37,28 +36,56 @@ def _config(a, create: bool = False) -> tuple[Path, dict]:
     path = Path(a.config).expanduser()
     if not path.exists():
         if not create:
-            raise SystemExit(f"no config at {path}: run `aircam setup` first (fan off)")
-        shutil.copy(app.EXAMPLE, path)
-        print(f"created {path} from {app.EXAMPLE.name}")
-    return path, app.load(path)
+            raise SystemExit(f"no config at {path}: run `aircam {a.target} detect` first (fan off)")
+        cfg = app.load(app.EXAMPLE)
+        cfg["target"] = a.target
+        if a.target == "sim":
+            cfg["output"]["port"] = ""                      # the laptop's address, from `aircam sim run LAPTOP`
+        app.save(path, cfg)
+        print(f"created {path}")
+    cfg = app.load(path)
+    cfg.setdefault("target", a.target)
+    return path, cfg
 
 
-def cmd_setup(a):
+def cmd_detect(a):
     from . import app
     path, cfg = _config(a, create=True)
     near = tuple(float(v) for v in a.near.split(",")) if a.near else None
-    app.setup(cfg, path, dark=a.dark, near=near)
+    app.detect(cfg, path, near=near, web=a.web, port=a.web_port, yes=a.yes)
 
 
-def cmd_preview(a):
+def cmd_view(a):
     from . import app
-    app.preview(_config(a)[1], web=a.web, port=a.web_port, udp=a.udp)
+    _, cfg = _config(a)
+    port = cfg.get("output", {}).get("port", "")
+    udp = port[4:] if a.target == "sim" and port.startswith("udp:") else None   # the simulator's panel, too
+    app.view(cfg, web=a.web, port=a.web_port, udp=udp)
 
 
 def cmd_run(a):
+    from . import app, stream
+    path, cfg = _config(a)
+    port = a.port
+    if a.target == "sim":
+        if a.laptop:
+            cfg["output"]["port"] = stream.udp_port(a.laptop)
+            app.save(path, cfg)
+        port = port or cfg["output"].get("port")
+        if not port:
+            raise SystemExit("where is the simulator? aircam sim run LAPTOP_ADDRESS (it is on the simulator's "
+                             "panel); it is remembered after the first time")
+    app.run(cfg, port, a.record, a.seconds)
+
+
+def cmd_check(a):
     from . import app
-    port = f"udp:{a.udp if ':' in a.udp else a.udp + ':5005'}" if a.udp else a.port
-    app.run(_config(a)[1], port, a.record, a.seconds)
+    path, cfg = _config(a)
+    print(f"tracking the ball for {a.seconds:g} s (fan off: the camera's noise floor; fan on: how it follows)")
+    r = app.check(cfg, a.seconds, image=path.with_name(f"aircam-{a.target}-check.png"))
+    print(app.report_text(r))
+    if "image" in r:
+        print(f"the last frame, with the ball circled and its rest marked: {r['image']}")
 
 
 def cmd_pluck(a):
@@ -74,17 +101,7 @@ def cmd_pluck(a):
     if a.write:
         cfg.setdefault("estimator", {}).update(fn=round(r["fn"], 4), zeta=round(r["zeta"], 4))
         app.save(path, cfg)
-        print(f"wrote fn and zeta into {path} (used when estimator.instrument is \"second\")")
-
-
-def cmd_check(a):
-    from . import app
-    path, cfg = _config(a)
-    print(f"tracking the ball for {a.seconds:g} s (fan off: the camera's noise floor; fan on: how it follows)")
-    r = app.check(cfg, a.seconds, image=path.with_name("aircam-check.png"))
-    print(app.report_text(r))
-    if "image" in r:
-        print(f"the last frame, with the ball circled and its rest marked: {r['image']}")
+        print(f"wrote fn and zeta into {path}")
 
 
 def cmd_cal(a):
@@ -116,15 +133,10 @@ def cmd_fit(a):
     from . import demo, fit, models
     run = fit.load_run(a.aligned)
     pi = run["meta"].get("aircam") or {}           # the Pi's "# aircam k=… arm=…" lines, kept by `aircam screen`
+    target = "sim" if run["meta"] else "real"      # only the simulator writes _meta.json
     k, arm = a.k or pi.get("k"), a.arm or pi.get("arm")
     if k is None or arm is None:
-        cfg_path = Path(a.config).expanduser()
-        if cfg_path.exists():
-            m = json.loads(cfg_path.read_text())["map"]
-            k, arm = k or m["k"], arm or m["arm_mm"]
-    if k is None or arm is None:
-        raise SystemExit("which map did the run use? Pass --k and --arm (the Pi prints them when `run` starts; "
-                         "`aircam cal` shows them)")
+        raise SystemExit("which map did the run use? Pass --k and --arm (`aircam real cal` on the Pi shows them)")
     old = models.Pendulum(k=float(k), arm_mm=float(arm))
     d = fit.readings(old, run["v_st"])
     r = fit.fit_pendulum(run["t_gt"], run["v_gt"], run["t_st"], d, arm=old.arm_mm, fit_arm=not a.pin_arm)
@@ -135,16 +147,8 @@ def cmd_fit(a):
     print(f"ran with   k {old.k:.4g} m/s, arm {old.arm_mm:.4g} mm: logger MSE {before['mse']:.4f} "
           f"(bias {before['bias']:+.3f}, σ {before['sigma']:.3f}, n {before['n']})")
     print(f"fitted     k {new.k:.4g} m/s, arm {new.arm_mm:.4g} mm: logger MSE {after['mse']:.4f} "
-          f"(bias {after['bias']:+.3f}, σ {after['sigma']:.3f}); best shift {r['shift']:+.2f} s, "
-          f"MSE {r['mse']:.4f} there")
-    print(f"on the Pi:  aircam set k={new.k:.4f} arm={new.arm_mm:.2f}")
-    if a.write:
-        from . import app
-        path = Path(a.write).expanduser()
-        cfg = app.load(path)
-        cfg["map"] = models.to_dict(new)
-        app.save(path, cfg)
-        print(f"wrote the map into {path}")
+          f"(bias {after['bias']:+.3f}, σ {after['sigma']:.3f}); best shift {r['shift']:+.2f} s")
+    print(f"on the Pi:  aircam {target} set k={new.k:.4f} arm={new.arm_mm:.2f}")
 
 
 def _sim_cfg(a):
@@ -153,15 +157,16 @@ def _sim_cfg(a):
     return replace(sim.SimConfig(), **over)
 
 
-def _add_sim_args(p):
+def cmd_offline(a):
     from . import sim
-    for f in fields(sim.SimConfig):
-        if isinstance(f.default, (int, float, str)):
-            p.add_argument("--" + f.name.replace("_", "-"), dest=f.name, type=type(f.default), default=None)
-
-
-def cmd_sim(a):
-    from . import sim
+    if a.compare:
+        rows = sim.compare(_sim_cfg(a), fps=[float(x) for x in a.rates.split(",")])
+        print("| fps | estimator | MSE (logger) | bias | σ | MSE (true speed) |")
+        print("| --- | --- | --- | --- | --- | --- |")
+        for r in rows:
+            print(f"| {r['fps']:g} | {r['estimator']} | {r['mse']:.4f} | {r['bias']:+.3f} | {r['sigma']:.3f} | "
+                  f"{r['true_mse']:.4f} |")
+        return
     r = sim.run(_sim_cfg(a), a.est)
     for key in ("logger", "truth"):
         s = r[key]
@@ -170,14 +175,40 @@ def cmd_sim(a):
           f"arm {r['arm']:.4g}")
 
 
-def cmd_compare(a):
-    from . import sim
-    rows = sim.compare(_sim_cfg(a), fps=[float(x) for x in a.rates.split(",")])
-    print("| fps | estimator | MSE (logger) | bias | σ | MSE (true speed) |")
-    print("| --- | --- | --- | --- | --- | --- |")
-    for r in rows:
-        print(f"| {r['fps']:g} | {r['estimator']} | {r['mse']:.4f} | {r['bias']:+.3f} | {r['sigma']:.3f} | "
-              f"{r['true_mse']:.4f} |")
+def _target(sub, name: str, help_: str):
+    t = sub.add_parser(name, help=help_)
+    cmds = t.add_subparsers(dest="cmd", required=True, metavar="command")
+
+    def command(cmd, fn, help_):
+        p = cmds.add_parser(cmd, help=help_)
+        p.add_argument("--config", default=CONFIGS[name], help=f"calibration file (default {CONFIGS[name]})")
+        p.set_defaults(fn_=fn, target=name)
+        return p
+
+    p = command("detect", cmd_detect, "1. fan off: find the ball, show it in colour, confirm it")
+    p.add_argument("--near", help="X,Y: the ball is near this pixel (when the biggest round thing is not it)")
+    p.add_argument("--web", action="store_true", help="show it in the laptop's browser even with a desktop")
+    p.add_argument("--web-port", type=int, default=8080)
+    p.add_argument("--yes", action="store_true", help="accept the detection without asking")
+    p = command("view", cmd_view, "2. the live colour feed with the tracking drawn on it")
+    p.add_argument("--web", action="store_true", help="in the laptop's browser instead of a window")
+    p.add_argument("--web-port", type=int, default=8080)
+    p = command("run", cmd_run, "3. stream the speed at 200 Hz")
+    if name == "sim":
+        p.add_argument("laptop", nargs="?", help="the simulator's address, from its panel (remembered)")
+    else:
+        p.set_defaults(laptop=None)
+    p.add_argument("--port", help="override: a serial device, '-' for stdout, or udp:HOST:PORT")
+    p.add_argument("--record", help="directory to save every frame's reading and every line in")
+    p.add_argument("--seconds", type=float, help="stop after this long")
+    p = command("check", cmd_check, "10 s of tracking, then a report")
+    p.add_argument("--seconds", type=float, default=10.0)
+    p = command("pluck", cmd_pluck, "the ball's natural frequency and damping, from a free swing")
+    p.add_argument("--seconds", type=float, default=12.0)
+    p.add_argument("--write", action="store_true", help="save fn and zeta in the config")
+    command("cal", cmd_cal, "print the calibration file")
+    p = command("set", cmd_set, "change values: set k=9.1 arm=148 (k arm port exposure gain fps sigma q)")
+    p.add_argument("pairs", nargs="+", metavar="key=value")
 
 
 def main(argv=None):
@@ -186,52 +217,26 @@ def main(argv=None):
         from . import screen
         return screen.main(argv[1:])
     ap = argparse.ArgumentParser(prog="aircam", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="command")
-
-    def command(name, fn, help_):
-        p = sub.add_parser(name, help=help_)
-        p.add_argument("--config", default=DEFAULT_CONFIG, help=f"config file (default {DEFAULT_CONFIG})")
-        p.set_defaults(fn_=fn)
-        return p
-
-    p = command("setup", cmd_setup, "fan off: find the ball and save where it rests")
-    p.add_argument("--dark", action="store_true", help="the ball is darker than its background")
-    p.add_argument("--near", help="X,Y: pick the round blob nearest this pixel instead of the biggest")
-    p = command("preview", cmd_preview, "live feed with the tracking drawn on it, and the speed")
-    p.add_argument("--web", action="store_true", help="serve it to a browser on the laptop instead of a window")
-    p.add_argument("--web-port", type=int, default=8080)
-    p.add_argument("--udp", help="HOST[:PORT]: also send the speed to the screen simulator, to compare with truth")
-    p = command("check", cmd_check, "track the ball for a few seconds and report how well (no desktop needed)")
-    p.add_argument("--seconds", type=float, default=10.0)
-    p = command("run", cmd_run, "stream the speed at 200 Hz")
-    p.add_argument("--port", help="serial device, '-' for stdout, or udp:HOST:PORT (default: output.port)")
-    p.add_argument("--udp", help="HOST[:PORT] of the laptop running `aircam screen` (port 5005 by default)")
-    p.add_argument("--record", help="directory to save every frame's reading and every line in")
-    p.add_argument("--seconds", type=float, help="stop after this long")
-    p = command("pluck", cmd_pluck, "natural frequency and damping from a free decay")
-    p.add_argument("--seconds", type=float, default=12.0)
-    p.add_argument("--write", action="store_true", help="save fn and zeta in the config")
-    command("cal", cmd_cal, "print the calibration file")
-    p = command("set", cmd_set, "change config values: aircam set k=9.1 arm=148")
-    p.add_argument("pairs", nargs="+", metavar="key=value")
-    p = command("fit", cmd_fit, "fit the map from a recorded run's _aligned.csv")
+    sub = ap.add_subparsers(dest="group", required=True, metavar="real | sim | screen | fit | offline")
+    _target(sub, "real", "the physical rig (on the Pi)")
+    _target(sub, "sim", "the screen simulation (on the Pi, its camera on the laptop's screen)")
+    sub.add_parser("screen", help="the simulator display (laptop): aircam screen --help")
+    p = sub.add_parser("fit", help="calibrate from a recorded run's _aligned.csv (laptop)")
     p.add_argument("aligned", help="<run>_aligned.csv from the Wind Tunnel Logger or `aircam screen`")
-    p.add_argument("--k", type=float, help="the k the run used (read from the simulator's notes if it has them)")
+    p.add_argument("--k", type=float, help="the k the run used (the simulator's runs record it)")
     p.add_argument("--arm", type=float, help="the arm the run used")
     p.add_argument("--pin-arm", action="store_true", help="keep the arm, fit k only")
-    p.add_argument("--write", help="config file to write the fitted map into")
-    simulating = argv[:1] in (["sim"], ["compare"])      # only then import the simulator and its flags
-    p = sub.add_parser("sim", help="the chain simulated without a camera")
-    if simulating:
-        _add_sim_args(p)
+    p.set_defaults(fn_=cmd_fit)
+    p = sub.add_parser("offline", help="the whole chain without a camera (laptop design tool)")
+    if argv[:1] == ["offline"]:                     # only then import the simulator for its flags
+        from . import sim
+        for f in fields(sim.SimConfig):
+            if isinstance(f.default, (int, float, str)):
+                p.add_argument("--" + f.name.replace("_", "-"), dest=f.name, type=type(f.default), default=None)
     p.add_argument("--est", default="kalman", choices=["hold", "linear", "kalman", "kalman-matched"])
-    p.set_defaults(fn_=cmd_sim)
-    p = sub.add_parser("compare", help="estimators x frame rates, simulated")
-    if simulating:
-        _add_sim_args(p)
-    p.add_argument("--rates", default="30,60,120", help="frame rates to compare, comma-separated")
-    p.set_defaults(fn_=cmd_compare)
-    sub.add_parser("screen", help="the screen simulator (laptop): aircam screen --help")
+    p.add_argument("--compare", action="store_true", help="every estimator at several frame rates")
+    p.add_argument("--rates", default="30,60,120")
+    p.set_defaults(fn_=cmd_offline)
     a = ap.parse_args(argv)
     a.fn_(a)
 

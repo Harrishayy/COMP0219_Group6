@@ -1,13 +1,14 @@
-"""The sensor on the Pi: camera → ball → estimator → a line every 5 ms, plus the setup and checking tools.
+"""The sensor on the Pi. The steps, in order (the commands are `aircam real …` or `aircam sim …`):
 
-run      Two threads. The capture thread waits on the camera, finds the ball in each frame and updates the
-         estimator. The output thread wakes on an absolute 5 ms schedule, asks the estimator for the speed at that
-         instant and writes the line. So the stream stays at 200 Hz whatever the camera does, and a dropped frame
-         only means one tick predicts a little further ahead. Once a second it prints what it is doing.
-setup    Fan off: find the ball, measure where it rests and how it looks, and save that in the config.
-preview  A window on the Pi's desktop (or Pi Connect screen sharing) with the tracked ball and the live speed.
-         For setting up and checking only: drawing makes the camera drop frames, so never during a scored run.
-record   Frames only, for a pluck test (the ball's free decay in still air).
+detect   Fan off: find the ping pong ball, show it in colour with a circle on it, and save it once you confirm
+         it is the ball (Y; or click the ball if the circle is on something else). Nothing else runs until a
+         detection has been confirmed.
+view     The live colour feed with the tracking drawn on it, in a window on the Pi's desktop or in the laptop's
+         browser (--web). For checking only: drawing makes the camera drop frames.
+run      Two threads. The capture thread finds the ball in each frame and updates the estimator; the output
+         thread wakes on an absolute 5 ms schedule and writes the speed. The stream stays at 200 Hz whatever the
+         camera does. Once a second it prints what it is doing.
+check    10 s of tracking, then a report. pluck: the ball's free decay in still air.
 
 Stopped by SIGTERM (systemctl stop), SIGINT (Ctrl+C) or SIGHUP (a closed Pi Connect shell tab), after which it
 closes the port and the recording cleanly.
@@ -47,6 +48,13 @@ def build(cfg: dict):
     return model, ball, est
 
 
+def require_ball(cfg: dict):
+    """Tracking starts only from a detection someone has looked at and confirmed."""
+    b = cfg.get("ball") or {}
+    if not b.get("confirmed"):
+        raise SystemExit(f"no confirmed ball yet: run `aircam {cfg.get('target', 'real')} detect` first (fan off)")
+
+
 def _camera(cfg):
     from .capture import Camera
     return Camera(**cfg.get("camera", {}))
@@ -60,8 +68,7 @@ def _stop_on_signals(stop: threading.Event):
 
 
 def run(cfg: dict, port: str | None = None, record: str | None = None, seconds: float | None = None, quiet=False):
-    if not cfg.get("ball"):
-        raise SystemExit("no ball in the config yet: run `aircam setup` first (fan off)")
+    require_ball(cfg)
     sys.setswitchinterval(0.0005)           # hand the GIL over quickly, so the output thread wakes on time
     model, ball, est = build(cfg)
     out = cfg.get("output", {})
@@ -146,8 +153,8 @@ def run(cfg: dict, port: str | None = None, record: str | None = None, seconds: 
     return out_dir
 
 
-def grab(cam, n: int = 30, skip: int = 10):
-    """The median of n frames' Y planes (after skip), so sensor noise does not move the setup."""
+def grab(cam, n: int = 15, skip: int = 10):
+    """The median of n frames (after skip), so sensor noise does not move the detection; and the frames."""
     cam.start()
     try:
         it = cam.frames()
@@ -159,34 +166,119 @@ def grab(cam, n: int = 30, skip: int = 10):
     return np.median(np.stack(frames), axis=0).astype(np.uint8), frames
 
 
-def setup(cfg: dict, config_path, dark: bool = False, near=None, ball_mm: float = features.BALL_MM):
-    """Fan off: find the ball, save where it rests and how it looks. Returns the updated config."""
+def detect(cfg: dict, config_path, near=None, web: bool = False, port: int = 8080, yes: bool = False):
+    """Step 1, fan off: find the ball, show it in colour, save it once confirmed. Returns the updated config."""
     cam = _camera(cfg)
-    _, frames = grab(cam, 30)
-    b, still, jitter = features.setup(frames, dark=dark, near=near, ball_mm=ball_mm)
-    image = Path(config_path).expanduser().with_name("aircam-setup.png")
-    if b is None:
-        path = features.save_image(image, still)
-        raise SystemExit(f"no ball found. Look at {path}: the ball should be the brightest round thing in view "
-                         "(fan off, light on, dark background). Try --near X,Y, or --dark for a dark ball.")
-    cfg["ball"] = features.to_config(b)
+    _, frames = grab(cam)
+    image = Path(config_path).expanduser().with_name(f"aircam-{cfg.get('target', 'real')}-detect.png")
+    while True:
+        b, still, jitter = features.setup(frames, near=near)
+        if b is None:
+            path = features.save_image(image, still)
+            raise SystemExit(f"no ball found. The camera's view is in {path}: the ball should be the biggest round "
+                             "thing that stands out (fan off, light on, a plain background behind it). If it is "
+                             "there, point at it: aircam … detect --near X,Y (pixels)")
+        path = features.save_image(image, still, [(b.rest[0] + b.outline[0], b.rest[1] + b.outline[1], b.radius)])
+        if yes:
+            break
+        answer = confirm(still, b, web, port)
+        if answer == "y":
+            break
+        if answer == "n":
+            raise SystemExit("not saved. Move the ball, the camera or the light and run detect again, or point at "
+                             "the ball: detect --near X,Y (pixels; the grid on the image is every 100 px)")
+        near = answer                                       # clicked or typed: look for the ball there
+    cfg["ball"] = {**features.to_config(b), "confirmed": True}
     save(config_path, cfg)
-    path = features.save_image(image, still, [(b.rest[0], b.rest[1], b.radius)])
-    print(f"ball at ({b.rest[0]:.1f}, {b.rest[1]:.1f}) px, radius {b.radius:.1f} px ({b.mm_per_px:.3f} mm/px), "
-          f"ball grey {b.fg:.0f} vs {b.bg:.0f} around it; still-air jitter {jitter:.3f} mm")
-    print(f"saved in {config_path}; check the circle in {path}")
-    if b.fg > 245:
-        print("warning: the ball is saturated; lower the exposure (aircam set exposure=2000) and run setup again")
-    if abs(b.fg - b.bg) < 40:
-        print("warning: little contrast between the ball and its background; darken the background or add light")
+    print(f"confirmed and saved in {config_path}: ball at ({b.rest[0]:.0f}, {b.rest[1]:.0f}) px, radius "
+          f"{b.radius:.1f} px ({b.mm_per_px:.3f} mm/px), contrast {b.contrast:.0f}, still-air jitter "
+          f"{jitter:.3f} mm; image {path}")
+    if max(np.atleast_1d(b.fg)) > 250:
+        print("warning: the ball is saturated: lower the exposure (aircam … set exposure=1500) and detect again")
+    if b.contrast < 40:
+        print("warning: the ball barely stands out: a darker or plainer background, or more light on the ball")
     if b.radius < 8:
-        print("warning: the ball is small in the image; move the camera closer for finer positions")
+        print("warning: the ball is small in the image: move the camera closer for finer positions")
+    print(f"next: aircam {cfg.get('target', 'real')} view   (watch it track), then run")
     return cfg
+
+
+def detect_image(still, b):
+    """The detection to confirm: the colour frame, a pixel grid every 100 px, and the ball circled."""
+    import cv2
+    img = still.copy() if still.ndim == 3 else cv2.cvtColor(still, cv2.COLOR_GRAY2BGR)
+    h, w = img.shape[:2]
+    def label(text, at):
+        for colour, thick in (((0, 0, 0), 3), ((255, 255, 255), 1)):     # readable on light and dark
+            cv2.putText(img, text, at, cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, thick, cv2.LINE_AA)
+    for x in range(100, w, 100):
+        cv2.line(img, (x, 0), (x, h), (90, 90, 90), 1)
+        label(str(x), (x + 3, 15))
+    for y in range(100, h, 100):
+        cv2.line(img, (0, y), (w, y), (90, 90, 90), 1)
+        label(str(y), (3, y - 3))
+    c = (int(round(b.rest[0] + b.outline[0])), int(round(b.rest[1] + b.outline[1])))
+    cv2.circle(img, c, int(round(b.radius)), (0, 255, 0), 3, cv2.LINE_AA)
+    cv2.drawMarker(img, c, (0, 255, 0), cv2.MARKER_CROSS, 12, 2)
+    text = "Green circle on the ping pong ball?   Y = yes   N = no   or click the ball"
+    size = 0.6
+    while size > 0.3 and cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, size, 1)[0][0] > w - 20:
+        size -= 0.05
+    cv2.rectangle(img, (0, h - 34), (w, h), (0, 0, 0), -1)
+    cv2.putText(img, text, (10, h - 11), cv2.FONT_HERSHEY_SIMPLEX, size, (255, 255, 255), 1, cv2.LINE_AA)
+    return img
+
+
+def confirm(still, b, web: bool = False, port: int = 8080):
+    """Ask whether the circle is on the ball: "y", "n", or (x, y) px where the ball really is. A window with
+    keys and clicks on the Pi's desktop; otherwise the image in the laptop's browser and the question here."""
+    import os
+    from . import view
+
+    img = detect_image(still, b)
+    if not web and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        import cv2
+        scale = min(1.0, 1280 / img.shape[1])
+        shown = cv2.resize(img, (int(img.shape[1] * scale), int(img.shape[0] * scale))) if scale < 1 else img
+        clicked = []
+        name = "aircam detect: Y yes, N no, or click the ball"
+        cv2.namedWindow(name)
+        cv2.setMouseCallback(name, lambda ev, x, y, *_: clicked.append((x / scale, y / scale))
+                             if ev == cv2.EVENT_LBUTTONDOWN else None)
+        try:
+            while True:
+                cv2.imshow(name, shown)
+                k = cv2.waitKey(50) & 0xFF
+                if clicked:
+                    return clicked[-1]
+                if k in (ord("y"), ord("Y")):
+                    return "y"
+                if k in (ord("n"), ord("N"), ord("q"), 27):
+                    return "n"
+        finally:
+            cv2.destroyWindow(name)
+    server = view.Mjpeg(port)
+    try:
+        server.publish(img)
+        print(f"look at the detection: open {server.url} in the laptop's browser")
+        while True:
+            a = input("Is the green circle on the ping pong ball? [y = yes / n = no / X,Y = the ball is here]: ")
+            a = a.strip().lower()
+            if a in ("y", "yes", "n", "no"):
+                return a[0]
+            try:
+                x, y = (float(v) for v in a.split(","))
+                return (x, y)
+            except ValueError:
+                print("answer y, n, or the ball's pixel position as X,Y (the grid lines are every 100 px)")
+    finally:
+        server.close()
 
 
 def record(cfg: dict, seconds: float = 12.0):
     """(t, x) for every frame over `seconds`: the ball's sideways offset from rest in mm, signed (d is a distance,
     so it would fold a swing through rest into two peaks a cycle). For the pluck test's free decay."""
+    require_ball(cfg)
     _, ball, _ = build(cfg)
     cam = _camera(cfg)
     ts, ds = [], []
@@ -207,6 +299,7 @@ def record(cfg: dict, seconds: float = 12.0):
 
 def check(cfg: dict, seconds: float = 10.0, image=None) -> dict:
     """Track every frame for `seconds`, without streaming, and report how well the ball is being followed."""
+    require_ball(cfg)
     model, ball, _ = build(cfg)
     cam = _camera(cfg)
     ts, ds, cost, last = [], [], [], None
@@ -285,17 +378,18 @@ def report_text(r: dict) -> str:
     return "\n".join(lines + ["-> " + tip for tip in tips] + (["-> tracking looks healthy"] if not tips else []))
 
 
-def preview(cfg: dict, web: bool = False, port: int = 8080, udp: str | None = None, every: int = 4,
-            seconds: float | None = None):
+def view(cfg: dict, web: bool = False, port: int = 8080, udp: str | None = None, every: int = 4,
+         seconds: float | None = None):
     """The live view (view.py): every frame tracked, every `every`-th drawn with what the tracker saw, in a window
     on the Pi's desktop or, with web, in a browser on the laptop. udp=HOST[:PORT] also sends the speed to the
     screen simulator, so its panel shows the truth next to it (one line per frame: watch with it, score with run)."""
     import os
     from . import view
 
+    require_ball(cfg)
     if not web and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        raise SystemExit("no desktop here (a remote shell): use `aircam preview --web` and open the address it "
-                         "prints in the laptop's browser, or run preview in Pi Connect screen sharing")
+        raise SystemExit("no desktop here (a remote shell): add --web and open the address it prints in the "
+                         "laptop's browser, or run view in a terminal in Pi Connect screen sharing")
     import cv2
 
     model, ball, est = build(cfg)

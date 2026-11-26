@@ -1,5 +1,5 @@
 {
-  "about": "The Pi's calibration file (~/aircam.json). `aircam setup` fills in ball; `aircam fit` gives map.k and map.arm_mm; `aircam set key=value` changes anything.",
+  "about": "A calibration file (~/aircam-real.json or ~/aircam-sim.json). `detect` fills in ball; `aircam fit` gives map.k and map.arm_mm; `set key=value` changes anything.",
   "camera": {"size": [1332, 990], "bit_depth": 10, "fps": 120.0, "exposure_us": 3000, "gain": 4.0, "offset_s": 0.0},
   "ball": null,
   "map": {"type": "pendulum", "k": 8.6, "arm_mm": 150.0, "d0": 0.0},

@@ -24,12 +24,12 @@ What the software needs from the build:
   - a small aluminium plate on the straw moving past a fixed magnet (eddy currents), with the magnet epoxied, per
     the brief's safety rules.
 
-  Too much damping makes it slow; aim for the ball to overshoot once at most when flicked (`aircam pluck`).
+  Too much damping makes it slow; aim for the ball to overshoot once at most when flicked (`aircam real pluck`).
 
 Write down here, once it exists:
 - the straw length from the hinge to the ball centre (mm), which is `arm` in the config before the fit refines it;
 - the ball's mass and the straw's;
-- the camera's distance and the ball's size in pixels (`aircam setup` prints it);
+- the camera's distance and the ball's size in pixels (`aircam real detect` prints it);
 - photos, and CAD (STL/STEP).
 
 Then run the tests in `../docs/algorithms.md` §7.

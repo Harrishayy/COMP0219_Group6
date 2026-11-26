@@ -17,7 +17,7 @@ H, W, HINGE = 480, 640, (320.0, 40.0)
 _yy, _xx = np.mgrid[:H, :W].astype(np.float32)
 
 
-def scene(bx, by, r=19.0, noise=2.0, seed=0, ball=230.0, dark=False):
+def scene(bx, by, r=19.0, noise=2.0, seed=0, ball=230.0):
     img = 25 + 8 * np.sin(_xx / 90) + 4 * np.cos(_yy / 70)
     img[:, 40:60] = img[:, 580:600] = 105                         # pillars
     img[30:48, 40:600] = 105                                      # crossbar
@@ -29,9 +29,26 @@ def scene(bx, by, r=19.0, noise=2.0, seed=0, ball=230.0, dark=False):
     cover = np.clip(r + 0.5 - d, 0, 1)
     img = img * (1 - cover) + (ball - 35 * np.clip(d / r, 0, 1) ** 2) * cover
     img = img + np.random.default_rng(seed).normal(0, noise, img.shape)
-    if dark:
-        img = 255 - img
     return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def orange_scene(bx, by, r=19.0, seed=0):
+    """Colour (B, G, R): an orange ball on a pale grey wall with a white straw and grey pillars, where brightness
+    alone would not pick the ball out: it is darker than the wall."""
+    rng = np.random.default_rng(seed)
+    img = np.empty((H, W, 3), np.float32)
+    img[:] = (190, 195, 200)                                      # pale wall
+    img[:, 40:60] = img[:, 580:600] = (120, 120, 125)             # pillars
+    img[30:48, 40:600] = (120, 120, 125)
+    t = np.linspace(0, 1, 800)[:, None]
+    sx, sy = HINGE[0] + t * (bx - HINGE[0]), HINGE[1] + t * (by - HINGE[1])
+    for dx in (-1, 0, 1):
+        img[sy.astype(int), (sx + dx).astype(int)] = (245, 245, 245)   # white straw
+    d = np.hypot(_xx - bx, _yy - by)
+    cover = np.clip(r + 0.5 - d, 0, 1)[..., None]
+    shade = (1 - 0.3 * np.clip(d / r, 0, 1) ** 2)[..., None]
+    img = img * (1 - cover) + np.array([20, 120, 235], np.float32) * shade * cover
+    return np.clip(img + rng.normal(0, 2.0, img.shape), 0, 255).astype(np.uint8)
 
 
 def at(theta_deg, arm=240.0):
@@ -178,17 +195,34 @@ def test_setup_finds_the_ball_not_the_pillars_or_the_straw():
     assert found is not None
     assert found[0] == pytest.approx(x, abs=0.5) and found[1] == pytest.approx(y, abs=1.0)
     assert found[2] == pytest.approx(19.0, rel=0.05)
-    dark = features.find_ball(scene(x, y, dark=True), dark=True)
-    assert dark is not None and dark[0] == pytest.approx(x, abs=0.5)
     assert features.find_ball(np.full((H, W), 30, np.uint8)) is None
+    grey = np.repeat(scene(x, y)[..., None], 3, axis=2).astype(np.float32)   # the same scene in colour, with
+    grey += np.random.default_rng(3).normal(0, 3.0, grey.shape)                # each channel's own sensor noise:
+    found = features.find_ball(np.clip(grey, 0, 255).astype(np.uint8))       # colour there is only noise
+    assert found[0] == pytest.approx(x, abs=0.5) and found[2] == pytest.approx(19.0, rel=0.05)
 
 
-def _tracker(dark=False):
+def test_colour_finds_and_tracks_an_orange_ball_on_a_pale_wall():
+    """The ball is darker than the wall, so brightness alone would miss it; its colour gives it away."""
     x, y = at(0)
-    img = scene(x, y, dark=dark)
-    fx, fy, r = features.find_ball(img, dark=dark)
-    fg, bg = features.levels(img, fx, fy, r, dark)
-    return features.Ball(rest=(fx, fy), radius=r, fg=fg, bg=bg, dark=dark), r
+    ball, still, _ = features.setup([orange_scene(x, y, seed=i) for i in range(3)])
+    assert ball is not None and ball.rest[0] == pytest.approx(x, abs=1.0)
+    assert ball.radius == pytest.approx(19, rel=0.08)
+    assert np.atleast_1d(ball.fg)[2] > 200 and np.atleast_1d(ball.fg)[0] < 60      # it learnt orange (B low, R high)
+    for deg in (5, 20, 40):
+        d = ball(orange_scene(*at(deg), seed=deg))
+        assert d / ball.mm_per_px == pytest.approx(2 * 240.0 * math.sin(math.radians(deg) / 2), abs=1.0)
+    back = features.from_config(features.to_config(ball))         # through the calibration file
+    img = orange_scene(*at(30), seed=7)
+    assert back(img) == pytest.approx(ball(img), abs=0.01)                 # mm; it searches from its rest
+
+
+def _tracker():
+    x, y = at(0)
+    img = scene(x, y)
+    fx, fy, r = features.find_ball(img)
+    fg, bg = features.levels(img, fx, fy, r)
+    return features.Ball(rest=(fx, fy), radius=r, fg=fg, bg=bg), r
 
 
 def test_ball_distance_from_rest_is_sub_pixel_across_the_swing():
@@ -212,12 +246,6 @@ def test_ball_lost_and_found_again():
     hidden[int(y) - 25:int(y) + 25, int(x) - 25:int(x) + 6] = 30   # most of the ball occluded
     assert ball(hidden) is None
     assert ball(scene(*at(40))) is not None and ball.pos[0] == pytest.approx(at(40)[0], abs=0.6)
-
-
-def test_dark_ball_tracks_too():
-    ball, _ = _tracker(dark=True)
-    d = ball(scene(*at(20), dark=True))
-    assert d / ball.mm_per_px == pytest.approx(2 * 240 * math.sin(math.radians(10)), abs=0.8)
 
 
 def test_ball_costs_well_under_a_millisecond():
@@ -269,9 +297,9 @@ def test_fit_command_prints_what_to_set_on_the_pi(tmp_path, capsys):
     tg, vg = demo.ground_truth(t, v, rate_hz=200.0, sigma=0.03)
     path = _write_run(tmp_path, tg, vg, t, ran.speed(models.Pendulum(k=9.0, arm_mm=150.0).reading(v)),
                       student_col="value_mps")
-    cli.main(["fit", str(path), "--k", "8.6", "--arm", "150", "--pin-arm", "--config", str(tmp_path / "none.json")])
+    cli.main(["fit", str(path), "--k", "8.6", "--arm", "150", "--pin-arm"])
     out = capsys.readouterr().out
-    assert "aircam set k=9.0" in out and "arm=150.00" in out
+    assert "aircam real set k=9.0" in out and "arm=150.00" in out          # a logger run: the physical rig
 
 
 def test_pluck_recovers_frequency_and_damping():
@@ -303,7 +331,7 @@ def test_score_pairs_within_150_ms_and_band():
 def test_example_config_builds_once_setup_has_found_the_ball():
     cfg = app.load(PI / "config.example.json")
     assert cfg["ball"] is None
-    cfg["ball"] = {"rest": [320, 280], "radius_px": 19, "fg": 220, "bg": 30}
+    cfg["ball"] = {"rest": [320, 280], "radius_px": 19, "fg": [220, 220, 220], "bg": [30, 30, 30], "confirmed": True}
     model, ball, est = app.build(cfg)
     assert isinstance(ball, features.Ball) and isinstance(est, estimator.Kalman)
     assert model.speed(model.reading(6.0)) == pytest.approx(6.0)
@@ -312,7 +340,7 @@ def test_example_config_builds_once_setup_has_found_the_ball():
 def test_set_understands_aliases_and_dotted_keys(tmp_path):
     path = tmp_path / "aircam.json"
     path.write_text((PI / "config.example.json").read_text())
-    cli.main(["set", "k=9.25", "arm=141", "port=udp:10.0.0.2:5005", "estimator.instrument=second",
+    cli.main(["sim", "set", "k=9.25", "arm=141", "port=udp:10.0.0.2:5005", "estimator.instrument=second",
               "--config", str(path)])
     cfg = app.load(path)
     assert cfg["map"]["k"] == 9.25 and cfg["map"]["arm_mm"] == 141

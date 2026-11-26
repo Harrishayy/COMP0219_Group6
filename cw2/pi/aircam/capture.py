@@ -8,8 +8,8 @@ Choices, from the lab and from picamera2's source (0.3.31 on Bookworm, 0.3.39 on
     so the ball's brightness does not move with the airflow;
   - NoiseReductionMode off: on the Pi 5 any other mode turns on temporal denoise, which blends each frame with
     the one before and would smear a moving ball;
-  - YUV420, so the Y plane is a free grayscale image. make_array returns (h·3/2, stride) with the row padding
-    left in (a 1332-wide image has a 1408-byte stride on the Pi 5), so the Y plane is cut to [:h, :w];
+  - colour: "RGB888", which Picamera2 stores B, G, R (OpenCV's order, as the lab says), and whose make_array
+    already cuts the row padding off, giving (h, w, 3). The lab ran this mode at 120 fps;
   - no preview window (drawing on the desktop makes the camera drop frames).
 
 HQ camera (IMX477) modes, max fps at 12/10/8 bit: 2028x1080 63/75/92, 1332x990 102/120/148 (lab README,
@@ -49,7 +49,7 @@ class Camera:
             raise SystemExit(f"{CAMERA_BUSY} ({e})") from e
         frame_us = int(round(1e6 / fps))
         cfg = self.cam.create_video_configuration(
-            main={"size": tuple(size), "format": "YUV420"},
+            main={"size": tuple(size), "format": "RGB888"},
             sensor={"output_size": tuple(size), "bit_depth": bit_depth},
             controls={"FrameDurationLimits": (frame_us, frame_us), "AeEnable": False, "AwbEnable": False,
                       "ExposureTime": int(exposure_us), "AnalogueGain": float(gain), "NoiseReductionMode": denoise_off},
@@ -66,13 +66,13 @@ class Camera:
         self.cam.stop()
 
     def frames(self):
-        """Yield (t, gray, metadata) for every frame: t the mid-exposure time in seconds, gray the Y plane."""
+        """Yield (t, bgr, metadata) for every frame: t the mid-exposure time in seconds, bgr the colour image."""
         while True:
             req = self.cam.capture_request()
             try:
-                yuv = req.make_array("main")
+                bgr = req.make_array("main")
                 md = req.get_metadata()
             finally:
                 req.release()
             t = md["SensorTimestamp"] * 1e-9 - md.get("ExposureTime", 0) * 0.5e-6 + self.offset_s
-            yield t, yuv[:self.h, :self.w], md
+            yield t, bgr, md

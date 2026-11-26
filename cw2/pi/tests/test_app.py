@@ -22,7 +22,8 @@ class FakeCamera:
     def __init__(self, fps=120.0, **_):
         self.fps = fps
         th = math.radians(self.theta_deg)
-        self.img = scene(HINGE[0] + ARM_PX * math.sin(th), HINGE[1] + ARM_PX * math.cos(th))
+        self.img = np.repeat(scene(HINGE[0] + ARM_PX * math.sin(th), HINGE[1] + ARM_PX * math.cos(th))[..., None],
+                             3, axis=2)                       # colour frames, as RGB888 gives them
 
     def start(self):
         self.t0 = stream.clock()
@@ -43,9 +44,9 @@ def test_setup_then_run_streams_200_hz_and_reads_the_air(tmp_path, monkeypatch, 
     monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
     cfg = dict(CFG)
     with pytest.raises(SystemExit):
-        app.run(cfg, port="-", seconds=0.1)                       # no ball yet: setup first
+        app.run(cfg, port="-", seconds=0.1)                       # no confirmed ball yet: detect first
     FakeCamera.theta_deg = 0.0
-    app.setup(cfg, tmp_path / "aircam.json")
+    app.detect(cfg, tmp_path / "aircam.json", yes=True)
     assert (tmp_path / "aircam.json").exists() and cfg["ball"]["radius_px"] == pytest.approx(19, rel=0.05)
 
     # the air at 6 m/s, for a map whose arm is the scene's arm in the ball's mm
@@ -68,15 +69,15 @@ def test_setup_then_run_streams_200_hz_and_reads_the_air(tmp_path, monkeypatch, 
     assert abs(float(lines[-1]) - 6.0) < 0.1                       # and reading the air
 
 
-def test_capture_cuts_the_row_padding_and_stamps_mid_exposure(monkeypatch):
-    """Picamera2's YUV420 make_array is (h·3/2, stride) with the padding left in (1408 for 1332 on a Pi 5), and
-    SensorTimestamp is the end of the first row's exposure: a stub with those shapes stands in for the camera."""
+def test_capture_gives_colour_frames_stamped_mid_exposure(monkeypatch):
+    """Colour frames (RGB888), and SensorTimestamp is the end of the first row's exposure: a stub with
+    Picamera2's shapes stands in for the camera."""
     import sys
     import types
 
     class Request:
         def make_array(self, name):
-            return np.zeros((990 * 3 // 2, 1408), np.uint8)
+            return np.zeros((990, 1332, 3), np.uint8)    # RGB888: padding already cut off
 
         def get_metadata(self):
             return {"SensorTimestamp": 5_000_000_000, "ExposureTime": 3000}
@@ -109,7 +110,7 @@ def test_capture_cuts_the_row_padding_and_stamps_mid_exposure(monkeypatch):
     cam = Camera(size=(1332, 990), exposure_us=3000)
     assert cam.cam.kw["controls"]["NoiseReductionMode"] == 0       # temporal denoise off (no libcamera here)
     t, gray, md = next(cam.frames())
-    assert gray.shape == (990, 1332)
+    assert gray.shape == (990, 1332, 3) and cam.cam.kw["main"]["format"] == "RGB888"
     assert t == pytest.approx(5.0 - 0.0015)
     Picamera2.cameras = []                        # no camera plugged in: say so, not "list index out of range"
     with pytest.raises(SystemExit, match="no camera found"):
@@ -120,7 +121,7 @@ def test_check_reports_how_well_the_ball_is_tracked(tmp_path, monkeypatch):
     monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
     cfg = dict(CFG)
     FakeCamera.theta_deg = 0.0
-    app.setup(cfg, tmp_path / "aircam.json")
+    app.detect(cfg, tmp_path / "aircam.json", yes=True)
     FakeCamera.theta_deg = 20.0
     r = app.check(cfg, seconds=1.0, image=tmp_path / "check.png")
     assert r["found"] == 1.0 and 100 < r["fps"] < 140 and r["noise_mm"] < 0.01
@@ -142,7 +143,7 @@ def test_report_flags_lost_frames_and_jumps():
 
 
 def test_live_view_draws_the_tracking_and_serves_it_to_a_browser(tmp_path, monkeypatch):
-    """preview --web: the annotated feed reaches a browser as MJPEG, and --udp feeds the simulator."""
+    """view --web: the annotated colour feed reaches a browser as MJPEG, and udp feeds the simulator."""
     cv2 = pytest.importorskip("cv2")
     import socket
     import threading
@@ -150,7 +151,7 @@ def test_live_view_draws_the_tracking_and_serves_it_to_a_browser(tmp_path, monke
     monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
     cfg = dict(CFG)
     FakeCamera.theta_deg = 0.0
-    app.setup(cfg, tmp_path / "aircam.json")
+    app.detect(cfg, tmp_path / "aircam.json", yes=True)
     FakeCamera.theta_deg = 25.0
     rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     rx.bind(("127.0.0.1", 0))
@@ -158,7 +159,7 @@ def test_live_view_draws_the_tracking_and_serves_it_to_a_browser(tmp_path, monke
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    th = threading.Thread(target=app.preview, args=(cfg,),
+    th = threading.Thread(target=app.view, args=(cfg,),
                           kwargs=dict(web=True, port=port, udp=f"127.0.0.1:{rx.getsockname()[1]}", seconds=2.5))
     th.start()
     time.sleep(1.0)
@@ -187,3 +188,32 @@ def test_overlay_marks_a_lost_ball_in_red():
     r = int(ball.radius * 0.5)
     ring = out[y - r - 2:y + r + 3, x - r - 2:x + r + 3].reshape(-1, 3)
     assert np.any((ring[:, 2] > 200) & (ring[:, 1] < 80))           # a red circle where the ball was
+
+
+def test_detect_asks_before_saving_and_can_be_pointed_at_the_ball(tmp_path, monkeypatch):
+    """No desktop: the detection is shown in the browser and the answer typed in the shell. A wrong pick is
+    corrected by typing where the ball is; nothing is saved until the answer is y."""
+    pytest.importorskip("cv2")
+    import urllib.request
+    monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    FakeCamera.theta_deg = 0.0
+    seen, answers = [], iter(["maybe", f"{HINGE[0]:.0f},{HINGE[1] + ARM_PX:.0f}", "y"])
+
+    def answer(prompt):
+        seen.append(prompt)
+        return next(answers)
+    monkeypatch.setattr("builtins.input", answer)
+    cfg = dict(CFG)
+    path = tmp_path / "aircam-real.json"
+    with pytest.raises(SystemExit):
+        app.view(cfg, web=True, port=0, seconds=0.1)                # nothing tracks before a confirmed detection
+    app.detect(cfg, path, web=True, port=0)
+    assert len(seen) == 3 and app.load(path)["ball"]["confirmed"] is True
+    assert (tmp_path / "aircam-real-detect.png").exists()
+
+    answers = iter(["n"])
+    with pytest.raises(SystemExit, match="not saved"):
+        app.detect(dict(CFG), tmp_path / "other.json", web=True, port=0)
+    assert not (tmp_path / "other.json").exists()

@@ -19,24 +19,28 @@ d = how far the ball is from rest, mm ──► Kalman (estimator.py) ──pred
 
 ## 1. Reading: from a frame to how far the ball has moved
 
-**Setup** (`aircam setup`, fan off) runs once per camera position.
-- **Finding the ball.** It takes 30 still frames and finds the ball as the biggest round blob brighter than its
-  surroundings. It looks at several grey levels, because at a low level a light straw joins the ball into one long
+**Detection** (`aircam real detect`, fan off) runs once per camera position, and is confirmed by eye before
+anything tracks.
+- **Finding the ball.** It takes 15 still colour frames and finds the ball as the biggest round blob that stands
+  out, either by brightness (a white ball on a dark background) or by colour (an orange ball on a pale one). It looks at several grey levels, because at a low level a light straw joins the ball into one long
   shape.
 - **What it measures:**
-  - the ball's grey level and its background's;
+  - the ball's colour and its background's;
   - the ball's radius in pixels. A ping pong ball is 40 mm, so the radius also gives the mm per pixel, and readings
     do not depend on how far away the camera is;
   - the rest position, measured by the tracker itself, so the centroid's offset on a shaded ball is in the rest
     position too.
-- **What it assumes about the scene:** only "a round thing brighter than what is around it". `--dark` flips that.
+- **What it assumes about the scene:** only "a round thing that differs from what is around it".
+- **Confirming it.** You press Y on the circled image, click the ball, or type its position.
 
 **Every frame** (`features.Ball`):
-- **Locating the ball.** A shrinking mean shift from where the ball was last: the soft-thresholded centroid inside
-  a disc of 2, then 1.5, then 1.25 radii.
+- **Scoring each pixel.** Each pixel near the ball gets a "ballness" score: its colour projected onto the line from
+  the background's colour (0) to the ball's (1). For a white ball on black this is brightness; for an orange ball it
+  is colour.
+- **Locating the ball.** A shrinking mean shift from where the ball was last: the soft-thresholded centroid of that
+  score inside a disc of 2, then 1.5, then 1.25 radii.
   - The disc keeps the straw, the pillars and glints out.
-  - The soft threshold (0 at the midpoint grey, 1 half the contrast above it) gives sub-pixel positions from the
-    ball's edge.
+  - The soft threshold (0 at a score of 0.5, 1 at 0.75) gives sub-pixel positions from the ball's edge.
 - **Cost.** It touches only a window around the ball, sub-sampled so the ball spans ~32 px. That is 0.05 ms a frame
   on a laptop; budget a few times that on the Pi, against 8.3 ms at 120 fps.
 - **Lost frames.** If the ball's weight in the disc is not 0.5–1.5 × its weight at rest (occluded, a glint, a
@@ -141,7 +145,7 @@ the score.
     connector.
   - No console runs on GPIO14/15 by default.
   - The FTDI 16 ms latency timer batches lines; that is ~8 ms of mean lag, worth ~0.0002.
-- **For the screen simulator:** `aircam run --udp <laptop>` sends the same lines as UDP datagrams instead.
+- **For the screen simulator:** `aircam sim run <laptop>` sends the same lines as UDP datagrams instead.
 
 ## 5. Calibration
 
@@ -157,7 +161,7 @@ simulator's.
    - the logger's MSE before and after;
    - the line to type on the Pi: `aircam set k=… arm=…`.
 3. **Score on the demo, not on holds.** Rehearse the protocol in both orders. Part 1's lesson: zero and gain dominate
-   the MSE. Here the zero is the rest position, measured by `aircam setup`, so rerun setup whenever the camera or the
+   the MSE. Here the zero is the rest position, measured by `aircam real detect`, so rerun detect whenever the camera or the
    rig is touched.
 
 ## 6. Simulators
@@ -186,8 +190,8 @@ simulator's.
 
 | Test | How | Gives |
 | --- | --- | --- |
-| Setup | `aircam setup`, fan off; check `~/aircam-setup.png`; `aircam preview` on the desktop | Rest position, mm/px, contrast, still-air jitter |
-| Pluck | `aircam pluck --write`: pull the ball ~20° and let go | fn, ζ: is the ball too lightly damped? |
+| Detect | `aircam real detect`, fan off, confirm the circled ball; then `aircam real view` and `aircam real check` | Rest position, mm/px, contrast, still-air jitter, camera noise |
+| Pluck | `aircam real pluck --write`: pull the ball ~20° and let go | fn, ζ: is the ball too lightly damped? |
 | Latency | An LED in view, toggled from a Pi GPIO at known times; compare with the frame times | `camera.offset_s`. `run` also prints the capture latency |
 | Frame budget | `aircam run` prints fps and how often the ball was seen | ROI size, exposure |
 | Calibration | §5, with the logger | k, arm |
@@ -203,7 +207,7 @@ simulator's.
   - Ask whether a light counts as part of the "passive instrument". We think not: the light is on the camera side,
     and the ball stays unpowered.
 - **Camera.**
-  - It is rigid on the mounting plate. Any shift moves the zero, so rerun `aircam setup` after touching it.
+  - It is rigid on the mounting plate. Any shift moves the zero, so rerun `aircam real detect` after touching it.
   - The ball's 40 mm diameter sets the scale, so the camera's distance does not need measuring.
 - **Time.**
   - SensorTimestamp is the end of the first row's exposure, so mid-exposure is SensorTimestamp − ExposureTime/2.

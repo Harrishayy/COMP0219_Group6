@@ -2,10 +2,11 @@
 # aircam: one command for the camera airspeed sensor.
 #
 #   On the Pi, once:   cd ~/sensors/cw2 && ./aircam install       (then `aircam` works from anywhere)
-#   On the Pi:         aircam setup | preview | run | pluck | cal | set k=9.1 | start | stop | logs
+#   Physical rig:      aircam real detect | view | run | check | pluck | cal | set …   (and real start | stop | logs)
+#   Simulation:        aircam sim detect | view | run LAPTOP | check | cal | set …
 #   On the laptop:     ./aircam install (makes .venv), ./aircam screen, ./aircam fit <run>_aligned.csv
 #
-# Everything except install/start/stop/status/logs/update is `python -m aircam <command>`: aircam --help lists it.
+# Everything except install, update and real start/stop/status/logs is `python -m aircam …`: aircam --help.
 set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PI_VENV="$HOME/comp0219"            # the week 6 environment: apt packages via --system-site-packages
@@ -37,23 +38,26 @@ install_pi() {
   sed -e "s|@USER@|$USER|g" -e "s|@HOME@|$HOME|g" -e "s|@HERE@|$HERE|g" -e "s|@PY@|$PI_VENV/bin/python|g" \
     "$HERE/pi/deploy/aircam.service" | sudo tee /etc/systemd/system/aircam.service >/dev/null
   sudo systemctl daemon-reload
-  [[ -f $HOME/aircam.json ]] || cp "$HERE/pi/config.example.json" "$HOME/aircam.json"
   "$PI_VENV/bin/python" -c "import picamera2, numpy, serial, cv2; print('picamera2 ok | numpy', numpy.__version__, '| opencv', cv2.__version__)"
-  echo "done. Next: aircam setup  (fan off; works in this terminal and any other)"
+  echo "done. Next: aircam real detect  (fan off), or aircam sim detect for the screen simulation"
 }
 
 install_laptop() {
   [[ -x "$HERE/.venv/bin/python" ]] || python3 -m venv "$HERE/.venv"
   "$HERE/.venv/bin/pip" install -q -r "$HERE/pi/requirements-laptop.txt"
-  echo "done: ./aircam screen (the simulator), ./aircam fit <run>_aligned.csv, ./aircam sim"
+  echo "done: ./aircam screen (the simulator), ./aircam fit <run>_aligned.csv, ./aircam offline"
 }
 
 case "${1:-}" in
   install)  if [[ "$(uname)" == Linux ]]; then install_pi; else install_laptop; fi ;;
-  start)    sudo systemctl start aircam && echo "started: aircam logs follows it, aircam stop stops it" ;;
-  stop)     sudo systemctl stop aircam ;;
-  status)   systemctl status aircam --no-pager ;;
-  logs)     journalctl -u aircam -f -n 20 ;;
+  real)     case "${2:-}" in      # the physical rig as a background service: closing the shell does not stop it
+              start)  exec sudo systemctl start aircam ;;
+              stop)   exec sudo systemctl stop aircam ;;
+              status) exec systemctl status aircam --no-pager ;;
+              logs)   exec journalctl -u aircam -f -n 20 ;;
+            esac
+            export PYTHONPATH="$HERE/pi${PYTHONPATH:+:$PYTHONPATH}"
+            exec "$(python_bin)" -m aircam "$@" ;;
   update)   git -C "$HERE" pull --ff-only ;;
   *)        # stay in the caller's directory, so relative paths (fit's CSV) still resolve
             export PYTHONPATH="$HERE/pi${PYTHONPATH:+:$PYTHONPATH}"

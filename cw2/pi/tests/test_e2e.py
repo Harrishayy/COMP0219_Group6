@@ -3,7 +3,7 @@ laptop screen, into the tracker, the Kalman filter, the fit and the logger's sco
 side the scene's geometry: setup finds the ball in a filmed still frame, and the map is fitted from a recorded
 calibration run, as on the day.
 
-The camera model: the laptop redraws at 60 Hz and shows each frame `lag` later; the camera samples at `fps` with
+The camera model (colour, as the Pi's RGB888 stream): the laptop redraws at 60 Hz and shows each frame `lag` later; the camera samples at `fps` with
 a `exposure` window, so a frame that straddles a refresh is a blend of two (as a rolling shutter catches a screen
 mid-update); the view is tilted and scaled (an affine warp with smoothing), slightly defocused, dimmer than the
 screen, with shot and read noise, quantised to 8 bits.
@@ -54,11 +54,11 @@ class Film:
         a = pg.surfarray.array3d(img).swapaxes(0, 1).astype(np.float32)
         y0, x0 = (a.shape[0] - CAMERA[1]) // 2, (a.shape[1] - CAMERA[0]) // 2
         a = a[y0:y0 + CAMERA[1], x0:x0 + CAMERA[0]]
-        y = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
-        return 0.25 * (y + np.roll(y, 1, 0) + np.roll(y, 1, 1) + np.roll(np.roll(y, 1, 0), 1, 1))   # defocus
+        bgr = a[..., ::-1]                                          # the camera gives B, G, R (RGB888)
+        return 0.25 * (bgr + np.roll(bgr, 1, 0) + np.roll(bgr, 1, 1) + np.roll(np.roll(bgr, 1, 0), 1, 1))  # defocus
 
     def sensor(self, optical):
-        """Exposure → 8-bit Y: dimmer than the screen, black level, shot and read noise."""
+        """Exposure → 8-bit colour: dimmer than the screen, black level, shot and read noise per channel."""
         s = 10.0 + 0.85 * optical
         s = s + self.rng.normal(0.0, 1.0, s.shape) * np.sqrt(2.0 + 0.04 * s)
         return np.clip(np.round(s), 0, 255).astype(np.uint8)

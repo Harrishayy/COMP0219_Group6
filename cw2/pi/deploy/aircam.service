@@ -1,6 +1,6 @@
 # The sensor as a service, so the remote interface only starts and stops it (the brief):
-#   aircam start      (sudo systemctl start aircam, from a Pi Connect remote shell)
-#   aircam stop
+#   aircam real start      (sudo systemctl start aircam, from a Pi Connect remote shell)
+#   aircam real stop       aircam real logs follows what it prints
 # `aircam install` fills in @USER@, @HOME@, @HERE@ and @PY@ and installs this as /etc/systemd/system/aircam.service.
 # Not enabled at boot on purpose: a run starts when we say so.
 [Unit]
@@ -10,8 +10,7 @@ After=multi-user.target
 [Service]
 User=@USER@
 WorkingDirectory=@HERE@/pi
-Environment=AIRCAM_CONFIG=@HOME@/aircam.json
-ExecStart=@PY@ -m aircam run
+ExecStart=@PY@ -m aircam real run --config @HOME@/aircam-real.json
 Restart=on-failure
 Nice=-10
 
