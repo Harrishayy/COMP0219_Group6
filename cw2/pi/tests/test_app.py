@@ -83,6 +83,12 @@ def test_capture_cuts_the_row_padding_and_stamps_mid_exposure(monkeypatch):
             pass
 
     class Picamera2:
+        cameras = [{"Model": "imx477", "Num": 0}]
+
+        @staticmethod
+        def global_camera_info():
+            return Picamera2.cameras
+
         def create_video_configuration(self, **kw):
             self.kw = kw
             return kw
@@ -103,3 +109,6 @@ def test_capture_cuts_the_row_padding_and_stamps_mid_exposure(monkeypatch):
     t, gray, md = next(cam.frames())
     assert gray.shape == (990, 1332)
     assert t == pytest.approx(5.0 - 0.0015)
+    Picamera2.cameras = []                        # no camera plugged in: say so, not "list index out of range"
+    with pytest.raises(SystemExit, match="no camera found"):
+        Camera()

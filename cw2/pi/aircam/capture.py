@@ -22,6 +22,14 @@ bottom); that fixed difference for where the ball is goes in `offset_s`, measure
 """
 from __future__ import annotations
 
+NO_CAMERA = """no camera found: the Pi does not see the camera (check: rpicam-hello --list-cameras).
+  1. sudo poweroff, then unplug the power: the Pi only looks for a camera when it boots.
+  2. Reseat both ends of the camera cable: straight in, metal contacts facing away from the dark flap,
+     the narrow 22-pin end in the Pi's CAM/DISP 0 connector, the wide 15-pin end in the camera.
+  3. Power on and run rpicam-hello --list-cameras: it should list imx477. Then aircam setup again."""
+CAMERA_BUSY = ("the camera would not open, usually because another program is using it: run `aircam stop` if the "
+               "service is running, and close any preview, rpicam or tutorial script that has the camera")
+
 
 class Camera:
     def __init__(self, size=(1332, 990), bit_depth: int = 10, fps: float = 120.0, exposure_us: int = 3000,
@@ -33,7 +41,12 @@ class Camera:
             denoise_off = lc.draft.NoiseReductionModeEnum.Off
         except (ImportError, AttributeError):
             denoise_off = 0
-        self.cam = Picamera2()
+        if not Picamera2.global_camera_info():     # picamera2 0.3.31 (Bookworm) says only "IndexError" here
+            raise SystemExit(NO_CAMERA)
+        try:
+            self.cam = Picamera2()
+        except RuntimeError as e:
+            raise SystemExit(f"{CAMERA_BUSY} ({e})") from e
         frame_us = int(round(1e6 / fps))
         cfg = self.cam.create_video_configuration(
             main={"size": tuple(size), "format": "YUV420"},
