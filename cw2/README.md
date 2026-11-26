@@ -28,11 +28,19 @@ aircam real view        # 2. watch it track: the live colour feed with the detec
 aircam real run         # 3. stream to the laptop's Wind Tunnel Logger; prints the speed once a second
 ```
 
-1. **Detect.** It shows the camera image with a green circle on what it thinks is the ball.
-   - On the Pi's desktop (or in Pi Connect screen sharing), a window opens. Press **Y** if the circle is on the ball,
-     **N** if not, or **click the ball** if it picked something else.
-   - In a remote shell, it prints an address to open in the laptop's browser and asks in the shell: `y`, `n`, or the
-     ball's position as `X,Y` (the image has a grid every 100 px).
+1. **Detect.** It shows the camera image with a green circle on what it thinks is the ball. It stays open until you
+   are happy:
+
+   | Key | Does |
+   | --- | --- |
+   | **Y** | Saves it |
+   | **N** | Tries again with fresh frames. Move the ball, the camera or the light first if it was wrong |
+   | **Click** the ball | Looks for it there |
+   | **Q** | Quits without saving |
+
+   - On the Pi's desktop (or in Pi Connect screen sharing), these are keys and clicks in the window.
+   - In a remote shell, it prints an address to open in the laptop's browser and asks in the shell instead: `y`, `n`,
+     `q`, or the ball's position as `X,Y` (the image has a grid every 100 px).
 
    Only a confirmed detection is saved. Rerun detect whenever the camera or the rig is moved.
 2. **View.** Add `--web` to watch in the laptop's browser instead of a window.

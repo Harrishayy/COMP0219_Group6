@@ -192,9 +192,8 @@ def test_overlay_marks_a_lost_ball_in_red():
 
 def test_detect_asks_before_saving_and_can_be_pointed_at_the_ball(tmp_path, monkeypatch):
     """No desktop: the detection is shown in the browser and the answer typed in the shell. A wrong pick is
-    corrected by typing where the ball is; nothing is saved until the answer is y."""
+    corrected by typing where the ball is; nothing is saved until the answer is y, and q quits without saving."""
     pytest.importorskip("cv2")
-    import urllib.request
     monkeypatch.setattr("aircam.capture.Camera", FakeCamera)
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
@@ -213,7 +212,40 @@ def test_detect_asks_before_saving_and_can_be_pointed_at_the_ball(tmp_path, monk
     assert len(seen) == 3 and app.load(path)["ball"]["confirmed"] is True
     assert (tmp_path / "aircam-real-detect.png").exists()
 
-    answers = iter(["n"])
-    with pytest.raises(SystemExit, match="not saved"):
+    answers = iter(["q"])
+    with pytest.raises(SystemExit, match="nothing saved"):
         app.detect(dict(CFG), tmp_path / "other.json", web=True, port=0)
     assert not (tmp_path / "other.json").exists()
+
+
+class BlankUntilFixed(FakeCamera):
+    """No ball in view until someone fixes it (the test's answer does), then the ball at rest."""
+    fixed = False
+
+    def frames(self):
+        blank = np.full_like(self.img, 30)
+        for t, img, md in super().frames():
+            yield t, (self.img if BlankUntilFixed.fixed else blank), md
+
+
+def test_detect_stays_open_and_tries_again_after_no(tmp_path, monkeypatch, capsys):
+    """N does not quit: the camera keeps running, fresh frames are taken, and the next try is shown."""
+    pytest.importorskip("cv2")
+    monkeypatch.setattr("aircam.capture.Camera", BlankUntilFixed)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    BlankUntilFixed.theta_deg, BlankUntilFixed.fixed = 0.0, False
+    prompts = []
+
+    def answer(prompt):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            assert prompt.startswith("No ball found")              # first try: nothing to confirm
+            BlankUntilFixed.fixed = True                            # ... so the ball is put in view
+            return "n"
+        assert prompt.startswith("Is the green circle")            # second try, fresh frames: there it is
+        return "y"
+    monkeypatch.setattr("builtins.input", answer)
+    app.detect(dict(CFG), tmp_path / "aircam-real.json", web=True, port=0)
+    assert len(prompts) == 2 and "trying again" in capsys.readouterr().out
+    assert app.load(tmp_path / "aircam-real.json")["ball"]["confirmed"] is True
